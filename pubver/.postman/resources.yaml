@@ -1,0 +1,7 @@
+# Use this workspace to collaborate
+workspace:
+  id: 03ccba02-567d-476c-8a22-800c80297877
+
+localResources:
+  specs:
+    - ..\openapi\public-verification.yaml

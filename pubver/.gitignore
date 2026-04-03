@@ -13,11 +13,18 @@
 go.work
 
 .env
+.env.local
+.env.*.local
 
 .idea/
 .vscode/
 *.swp
 *.swo
+
+.coverprofile
+coverage/
+*.log
+tmp/
 
 .DS_Store
 Thumbs.db

@@ -1,0 +1,5 @@
+$kind: collection
+name: Public Verification API
+variables:
+  - key: baseUrl
+    value: 'http://localhost:8080'

@@ -35,6 +35,29 @@ func (m *mockVerificationService) Search(ctx context.Context, vuzCode, diplomaNu
 	return m.searchFunc(ctx, vuzCode, diplomaNumber)
 }
 
+func TestHealthzEndpointSuccess(t *testing.T) {
+	t.Parallel()
+
+	handler := NewRouter(testLogger(), time.Second, &mockVerificationService{})
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: got %d want %d", recorder.Code, http.StatusOK)
+	}
+
+	var response map[string]string
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response["status"] != "ok" {
+		t.Fatalf("unexpected health status: got %q want %q", response["status"], "ok")
+	}
+}
+
 func TestVerifyEndpointSuccess(t *testing.T) {
 	t.Parallel()
 

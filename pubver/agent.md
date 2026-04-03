@@ -39,6 +39,8 @@ Important fields:
 
 For now they are not stored in PostgreSQL and are returned as `null` placeholders.
 
+`vuz_code` is the public university code in a format like `001X7276`, i.e. a registry code rather than a mnemonic alias.
+
 ## Request flow
 
 ### `/api/v1/verify`
