@@ -1,0 +1,107 @@
+openapi: 3.1.0
+info:
+  title: Public Verification API
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+  /api/v1/verify:
+    get:
+      summary: Verify diploma by RS256-signed QR JWT
+      parameters:
+        - in: query
+          name: payload
+          required: true
+          schema:
+            type: string
+          description: JWT from QR code with flat diploma claims
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+        "400":
+          description: Invalid request
+  /api/v1/verify/search:
+    get:
+      summary: Search diploma by vuz_code and diploma number
+      parameters:
+        - in: query
+          name: diploma_number
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: vuz_code
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Search result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Invalid request
+components:
+  schemas:
+    VerifyResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          description: Overall validity. false when diploma is revoked or not found.
+        status:
+          type: string
+          enum: [active, revoked, not_found]
+        hash:
+          type: string
+        diploma_number:
+          type: string
+        university:
+          type: string
+        vuz_code:
+          type: string
+        year:
+          type: integer
+          nullable: true
+          description: May be null until diploma_publications is populated by Crypto Engine.
+        specialty:
+          type: string
+          nullable: true
+          description: May be null until diploma_publications is populated by Crypto Engine.
+        revoked_at:
+          type: string
+          format: date-time
+      required: [valid, status]
+    SearchResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        status:
+          type: string
+          enum: [active, revoked, not_found]
+        university:
+          type: string
+        vuz_code:
+          type: string
+        year:
+          type: integer
+          nullable: true
+          description: May be null until diploma_publications is populated by Crypto Engine.
+        specialty:
+          type: string
+          nullable: true
+          description: May be null until diploma_publications is populated by Crypto Engine.
+      required: [valid, status]
