@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"testing"
 
 	"pubver/internal/domain"
@@ -114,5 +115,45 @@ func TestSearchReturnsNotFound(t *testing.T) {
 
 	if response.Status != domain.DiplomaStatusNotFound {
 		t.Fatalf("unexpected status: %s", response.Status)
+	}
+}
+
+func TestVerifyPayloadMissingUniversityReturnsGenericInvalidPayload(t *testing.T) {
+	t.Parallel()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa keypair: %v", err)
+	}
+
+	hash, err := verifyhash.HashDiplomaInput(verifyhash.DiplomaHashInput{
+		FullName:      "Ivanov Ivan Ivanovich",
+		DiplomaNumber: "DVS-2024-001234",
+		Specialty:     "Software Engineering",
+		Year:          2024,
+		VUZID:         "550e8400-e29b-41d4-a716-446655440000",
+		Salt:          "pepper",
+	})
+	if err != nil {
+		t.Fatalf("hash diploma input: %v", err)
+	}
+
+	payload := `{"sub":"` + hash + `","diploma_hash":"` + hash + `","vuz_id":"550e8400-e29b-41d4-a716-446655440000","diploma_number":"DVS-2024-001234","student_name":"Ivanov Ivan Ivanovich","specialty":"Software Engineering","year":2024,"salt":"pepper"}`
+	token, err := testutil.CreateRS256TestJWT(privateKey, payload)
+	if err != nil {
+		t.Fatalf("create test jwt: %v", err)
+	}
+
+	service := NewVerificationService(&fakeRepository{
+		verificationKeys: map[string]*domain.UniversityVerificationKey{},
+	})
+
+	_, err = service.VerifyPayload(context.Background(), token)
+	if !errors.Is(err, domain.ErrInvalidPayload) {
+		t.Fatalf("expected invalid payload error, got %v", err)
+	}
+
+	if err == nil || err.Error() != domain.ErrInvalidPayload.Error() {
+		t.Fatalf("expected generic invalid payload error text, got %v", err)
 	}
 }

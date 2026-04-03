@@ -1,143 +1,62 @@
-# agents.md
+# pubver agent notes
 
-## Назначение документа
+## Current verification model
 
-Этот файл фиксирует актуальный рабочий контекст проекта `pubver`, чтобы при следующих изменениях не пришлось заново восстанавливать архитектурные договоренности.
+Public verification uses only:
 
-Документ описывает:
+1. `RS256` verification of the QR JWT.
+2. Recomputed `SHA-256(full_name|diploma_number|specialty|year|vuz_id|salt)`.
+3. Lookup in `diploma_hashes`.
 
-- роль сервиса;
-- границы ответственности;
-- подтвержденный контракт публичной проверки;
-- используемые таблицы БД;
-- важные инварианты, которые нельзя ломать.
+`diploma_hashes.signature` is not used by the public verification flow.
 
-## Краткое описание сервиса
+## Database usage
 
-`pubver` — публичный read-only сервис для проверки диплома по QR JWT и для поиска по `diploma_number + vuz_code`.
+The service currently reads only:
 
-Сервис не выпускает дипломы и не изменяет реестр. Он только:
+- `universities`
+- `diploma_hashes`
 
-1. принимает JWT из QR;
-2. извлекает `vuz_id`;
-3. получает `public_key` ВУЗа из БД;
-4. проверяет `RS256` подпись JWT;
-5. пересчитывает `SHA-256` по payload;
-6. ищет хеш в БД;
-7. возвращает статус диплома.
+Important fields:
 
-## Источник истины
+- `universities.id`
+- `universities.name`
+- `universities.public_key`
+- `universities.vuz_code`
+- `diploma_hashes.hash`
+- `diploma_hashes.vuz_id`
+- `diploma_hashes.diploma_number`
+- `diploma_hashes.status`
+- `diploma_hashes.revoked_at`
 
-Для публичной проверки источником истины является не сам JWT, а связка:
+## Temporary placeholders
 
-- валидный `RS256` JWT;
-- корректно пересчитанный хеш;
-- наличие записи в `diploma_hashes`;
-- статус записи в `diploma_hashes.status`.
+`year` and `specialty` are intentionally kept in:
 
-JWT сам по себе не подтверждает действительность диплома без lookup в БД.
+- domain models;
+- JSON responses;
+- OpenAPI schema.
 
-## Подтвержденный verify-поток
+For now they are not stored in PostgreSQL and are returned as `null` placeholders.
 
-Поток `GET /api/v1/verify?payload=<jwt>` должен работать так:
+## Request flow
 
-1. Декодировать payload без доверия к нему.
-2. Достать `vuz_id`.
-3. Найти `universities.public_key`.
-4. Проверить `RS256` подпись JWT.
-5. Из валидного JWT извлечь:
-   - `student_name` или `full_name`
-   - `diploma_number`
-   - `specialty`
-   - `year`
-   - `vuz_id`
-   - `salt`
-6. Собрать строку:
+### `/api/v1/verify`
 
-```text
-full_name|diploma_number|specialty|year|vuz_id|salt
-```
+1. Read `payload`.
+2. Decode payload without trust.
+3. Extract `vuz_id`.
+4. Load `universities.public_key`.
+5. Verify JWT with `RS256`.
+6. Extract full claims.
+7. Recompute SHA-256.
+8. Compare with `sub` and `diploma_hash`.
+9. Lookup `diploma_hashes.hash`.
+10. Return public result.
 
-7. Посчитать `SHA-256`.
-8. Сравнить полученный хеш с `sub` и `diploma_hash`, если они есть в JWT.
-9. Выполнить lookup в `diploma_hashes.hash`.
-10. Вернуть статус `active`, `revoked` или `not_found`.
+### `/api/v1/verify/search`
 
-## Подтвержденный search-поток
-
-Поток `GET /api/v1/verify/search?diploma_number=&vuz_code=` должен:
-
-1. принимать `diploma_number`;
-2. принимать `vuz_code`;
-3. искать запись через `universities.vuz_code + diploma_hashes.diploma_number`;
-4. возвращать только публичные поля.
-
-## Важные инварианты
-
-- Публичная проверка должна использовать именно `RS256` для JWT.
-- `universities.public_key` в текущей модели — это RSA public key для проверки QR JWT.
-- Публичная проверка не должна использовать `diploma_hashes.signature`.
-- Публичная проверка не должна расшифровывать `encrypted_payload`.
-- Финальная валидность диплома определяется не JWT, а записью в БД.
-- Алгоритм хеширования в `pubver` и Crypto Engine должен быть одинаковым.
-
-## Алгоритм хеширования
-
-Контракт хеширования подтвержден такой:
-
-```text
-raw = full_name|diploma_number|specialty|year|vuz_id|salt
-hash = SHA-256(raw)
-```
-
-Результат хранится как hex-строка в нижнем регистре.
-
-## Таблицы БД, которые реально нужны `pubver`
-
-### `universities`
-
-Используются поля:
-
-- `id`
-- `name`
-- `public_key`
-- `vuz_code`
-
-### `diploma_hashes`
-
-Используются поля:
-
-- `hash`
-- `vuz_id`
-- `diploma_number`
-- `status`
-- `revoked_at`
-
-### `diploma_publications`
-
-Используются поля:
-
-- `diploma_hash`
-- `graduate_year`
-- `specialty`
-
-## Что не нужно придумывать без явного решения
-
-Нельзя считать подтвержденным без отдельной договоренности:
-
-- использование Ed25519 для публичной проверки;
-- отдельную проверку `diploma_hashes.signature`;
-- хранение нескольких типов ключей в `universities`;
-- обязательность `exp` для QR JWT;
-- дополнительные claims вроде `iss`, `aud`, `kid`, если они еще не закреплены контрактом.
-
-## Текущий вывод для дальнейшей разработки
-
-Если меняется схема публичной проверки, в первую очередь нужно синхронно обновлять:
-
-- `README.md`
-- `docs/architecture.md`
-- `openapi/public-verification.yaml`
-- `pkg/verifyhash/*`
-- `internal/service/verification_service.go`
-- `internal/repository/postgres/verification_repository.go`
+1. Read `vuz_code`.
+2. Read `diploma_number`.
+3. Query `universities.vuz_code + diploma_hashes.diploma_number`.
+4. Return status and placeholder metadata fields.

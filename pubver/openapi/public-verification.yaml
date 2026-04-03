@@ -75,11 +75,11 @@ components:
         year:
           type: integer
           nullable: true
-          description: May be null until diploma_publications is populated by Crypto Engine.
+          description: Reserved response field. Currently returned as null until DB storage is finalized.
         specialty:
           type: string
           nullable: true
-          description: May be null until diploma_publications is populated by Crypto Engine.
+          description: Reserved response field. Currently returned as null until DB storage is finalized.
         revoked_at:
           type: string
           format: date-time
@@ -99,9 +99,9 @@ components:
         year:
           type: integer
           nullable: true
-          description: May be null until diploma_publications is populated by Crypto Engine.
+          description: Reserved response field. Currently returned as null until DB storage is finalized.
         specialty:
           type: string
           nullable: true
-          description: May be null until diploma_publications is populated by Crypto Engine.
+          description: Reserved response field. Currently returned as null until DB storage is finalized.
       required: [valid, status]

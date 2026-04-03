@@ -45,3 +45,43 @@ func TestExtractVUZID(t *testing.T) {
 		t.Fatalf("unexpected vuz_id: %s", vuzID)
 	}
 }
+
+func TestExtractQRClaimsFromMap(t *testing.T) {
+	t.Parallel()
+
+	claims, err := ExtractQRClaimsFromMap(map[string]any{
+		"sub":            "abc123",
+		"diploma_hash":   "abc123",
+		"vuz_id":         "550e8400-e29b-41d4-a716-446655440000",
+		"diploma_number": "DVS-2024-001234",
+		"student_name":   "Ivanov Ivan Ivanovich",
+		"specialty":      "Software Engineering",
+		"year":           2024,
+		"salt":           "pepper",
+	})
+	if err != nil {
+		t.Fatalf("extract qr claims from map: %v", err)
+	}
+
+	if claims.VUZID != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("unexpected vuz_id: %s", claims.VUZID)
+	}
+	if claims.DiplomaNumber != "DVS-2024-001234" {
+		t.Fatalf("unexpected diploma_number: %v", claims.DiplomaNumber)
+	}
+}
+
+func TestExtractVUZIDFromMap(t *testing.T) {
+	t.Parallel()
+
+	vuzID, err := ExtractVUZIDFromMap(map[string]any{
+		"vuz_id": "550e8400-e29b-41d4-a716-446655440000",
+	})
+	if err != nil {
+		t.Fatalf("extract vuz_id from map: %v", err)
+	}
+
+	if vuzID != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("unexpected vuz_id: %s", vuzID)
+	}
+}

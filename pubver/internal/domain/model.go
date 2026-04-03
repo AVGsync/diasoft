@@ -36,8 +36,8 @@ type VerifyResponse struct {
 	DiplomaNumber string        `json:"diploma_number,omitempty"`
 	University    string        `json:"university,omitempty"`
 	VUZCode       string        `json:"vuz_code,omitempty"`
-	Year          *int          `json:"year,omitempty"`
-	Specialty     *string       `json:"specialty,omitempty"`
+	Year          *int          `json:"year"`
+	Specialty     *string       `json:"specialty"`
 	RevokedAt     *time.Time    `json:"revoked_at,omitempty"`
 }
 
@@ -46,6 +46,6 @@ type SearchResponse struct {
 	Status     DiplomaStatus `json:"status"`
 	University string        `json:"university,omitempty"`
 	VUZCode    string        `json:"vuz_code,omitempty"`
-	Year       *int          `json:"year,omitempty"`
-	Specialty  *string       `json:"specialty,omitempty"`
+	Year       *int          `json:"year"`
+	Specialty  *string       `json:"specialty"`
 }

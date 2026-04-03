@@ -18,12 +18,9 @@ SELECT
     dh.status,
     dh.revoked_at,
     u.vuz_code,
-    u.name,
-    dp.graduate_year,
-    dp.specialty
+    u.name
 FROM diploma_hashes dh
 JOIN universities u ON u.id = dh.vuz_id
-LEFT JOIN diploma_publications dp ON dp.diploma_hash = dh.hash
 `
 
 type VerificationRepository struct {
@@ -69,8 +66,6 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 	record := domain.DiplomaRecord{}
 	var status string
 	var revokedAt sql.NullTime
-	var graduateYear sql.NullInt32
-	var specialty sql.NullString
 	var universityCode sql.NullString
 
 	err := r.pool.QueryRow(ctx, query, args...).Scan(
@@ -80,8 +75,6 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 		&revokedAt,
 		&universityCode,
 		&record.University.Name,
-		&graduateYear,
-		&specialty,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -96,14 +89,6 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 
 	if revokedAt.Valid {
 		record.RevokedAt = &revokedAt.Time
-	}
-	if graduateYear.Valid {
-		value := int(graduateYear.Int32)
-		record.GraduateYear = &value
-	}
-	if specialty.Valid {
-		value := specialty.String
-		record.Specialty = &value
 	}
 
 	return &record, nil

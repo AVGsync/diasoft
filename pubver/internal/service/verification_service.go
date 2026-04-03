@@ -25,7 +25,12 @@ func (s *VerificationService) VerifyPayload(ctx context.Context, token string) (
 		return domain.VerifyResponse{}, domain.ErrInvalidInput
 	}
 
-	vuzID, err := verifyhash.ExtractVUZID(token)
+	claimsMap, err := verifyhash.DecodeUnverifiedJWT(token)
+	if err != nil {
+		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, err)
+	}
+
+	vuzID, err := verifyhash.ExtractVUZIDFromMap(claimsMap)
 	if err != nil {
 		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, err)
 	}
@@ -35,14 +40,14 @@ func (s *VerificationService) VerifyPayload(ctx context.Context, token string) (
 		return domain.VerifyResponse{}, err
 	}
 	if verificationKey == nil {
-		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, errors.New("university for vuz_id not found"))
+		return domain.VerifyResponse{}, domain.ErrInvalidPayload
 	}
 
 	if err := verifyhash.VerifyRS256JWT(token, verificationKey.PublicKey); err != nil {
 		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, err)
 	}
 
-	claims, err := verifyhash.ExtractQRClaims(token)
+	claims, err := verifyhash.ExtractQRClaimsFromMap(claimsMap)
 	if err != nil {
 		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, err)
 	}

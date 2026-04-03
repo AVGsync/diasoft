@@ -37,6 +37,15 @@ func ExtractQRClaims(token string) (QRClaims, error) {
 		return QRClaims{}, err
 	}
 
+	return ExtractQRClaimsFromMap(claims)
+}
+
+func ExtractQRClaimsFromMap(claims map[string]any) (QRClaims, error) {
+	vuzID, err := ExtractVUZIDFromMap(claims)
+	if err != nil {
+		return QRClaims{}, err
+	}
+
 	year, err := extractIntClaim(claims, "year")
 	if err != nil {
 		return QRClaims{}, err
@@ -51,10 +60,6 @@ func ExtractQRClaims(token string) (QRClaims, error) {
 		studentName = fullName
 	}
 
-	vuzID, err := extractStringClaim(claims, "vuz_id")
-	if err != nil {
-		return QRClaims{}, err
-	}
 	diplomaNumber, err := extractStringClaim(claims, "diploma_number")
 	if err != nil {
 		return QRClaims{}, err
@@ -86,6 +91,10 @@ func ExtractVUZID(token string) (string, error) {
 		return "", err
 	}
 
+	return ExtractVUZIDFromMap(claims)
+}
+
+func ExtractVUZIDFromMap(claims map[string]any) (string, error) {
 	return extractStringClaim(claims, "vuz_id")
 }
 

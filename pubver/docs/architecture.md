@@ -7,62 +7,72 @@
 Сервис:
 
 - не пишет в реестр дипломов;
-- не работает с `encrypted_payload`;
-- не читает Kafka;
-- не подписывает данные;
+- не работает с Kafka;
+- не обрабатывает batch upload;
+- не расшифровывает `encrypted_payload`;
+- не меняет статус диплома;
 - проверяет `RS256` подпись QR JWT;
-- пересчитывает хеш и ищет его в БД;
-- возвращает публичный статус диплома.
+- пересчитывает хеш и сверяет его с реестром.
 
 ## Поток `GET /api/v1/verify`
 
-1. Клиент сканирует QR и открывает ссылку `/api/v1/verify?payload=<jwt>`.
-2. Сервис декодирует payload без доверия к данным.
-3. Из payload извлекается `vuz_id`.
-4. По `vuz_id` сервис находит `universities.public_key`.
-5. Выполняется проверка `RS256` подписи самого JWT.
-6. Из валидного payload извлекаются `student_name`, `diploma_number`, `specialty`, `year`, `vuz_id`, `salt`.
-7. Собирается строка:
+1. Клиент открывает ссылку `/api/v1/verify?payload=<jwt>`.
+2. Сервис извлекает `vuz_id` из payload без доверия к данным.
+3. По `vuz_id` находит `universities.public_key`.
+4. Проверяет `RS256` подпись JWT.
+5. Из валидного payload читает `student_name`, `diploma_number`, `specialty`, `year`, `vuz_id`, `salt`.
+6. Собирает строку:
 
 ```text
 full_name|diploma_number|specialty|year|vuz_id|salt
 ```
 
-8. Считается `SHA-256`.
-9. Проверяется совпадение с `sub` и `diploma_hash`, если они есть в JWT.
-10. Выполняется поиск по `diploma_hashes.hash`.
-11. Возвращается `active`, `revoked` или `not_found`.
+7. Считает `SHA-256`.
+8. Сверяет результат с `sub` и `diploma_hash`, если они есть.
+9. Ищет хеш в `diploma_hashes`.
+10. Возвращает `active`, `revoked` или `not_found`.
 
 ## Поток `GET /api/v1/verify/search`
 
 1. Клиент передает `diploma_number` и `vuz_code`.
 2. Сервис ищет запись по `universities.vuz_code + diploma_hashes.diploma_number`.
-3. Возвращает публичный статус и дополнительные безопасные поля из `diploma_publications`.
+3. Возвращает публичный статус и дополнительные поля `year` и `specialty`.
+4. Пока схема БД для этих полей не утверждена, сервис отдает их как `null`-заглушки.
+
+## Временное состояние `year` и `specialty`
+
+Поля сохранены:
+
+- в доменных моделях;
+- в JSON-ответах;
+- в OpenAPI.
+
+Но пока не хранятся в PostgreSQL и не участвуют в SQL-запросах публичного сервиса.
+
+Это позволяет:
+
+- сохранить стабильный API-контракт;
+- не добавлять в БД временную схему;
+- подключить реальные данные позже без смены ответа.
 
 ## Почему нужен `vuz_code`
 
-В исходной схеме `universities` не было публичного короткого идентификатора для поиска. Поэтому в миграции добавляется `vuz_code`.
-
-## Что осталось без изменений
-
-- `year` и `specialty` как сущности хранения не менялись;
-- `diploma_publications` остается источником этих полей для публичного ответа;
-- `diploma_hashes.status` остается финальной истиной о действительности диплома.
+В исходной схеме `universities` не было публичного короткого идентификатора для поиска. Поэтому миграция добавляет `vuz_code`.
 
 ## Границы ответственности
 
 ### Main API / Gateway
 
 - принимает загрузки дипломов;
-- создает батчи;
-- публикует задачи в Kafka;
+- создает batch-задачи;
+- пишет в Kafka;
 - сохраняет результаты обработки.
 
 ### Crypto Engine
 
 - генерирует `salt`;
-- вычисляет `SHA-256` по согласованному контракту;
-- формирует `qr_payload`;
+- считает `SHA-256` по согласованному контракту;
+- формирует QR JWT;
 - подписывает QR JWT приватным RSA-ключом ВУЗа.
 
 ### Public Verification API
@@ -76,16 +86,16 @@ full_name|diploma_number|specialty|year|vuz_id|salt
 
 ## Что сервис сознательно не делает
 
-- не проверяет отдельную подпись записи диплома;
 - не использует `diploma_hashes.signature` в публичной верификации;
+- не выполняет отдельную Ed25519-проверку;
 - не определяет валидность диплома только по JWT без lookup в БД.
 
 ## Структура кода
 
-- [`cmd/pubver/main.go`](/d:/diasoft/pubver/cmd/pubver/main.go) — запуск приложения и graceful shutdown.
-- [`internal/httpapi/router.go`](/d:/diasoft/pubver/internal/httpapi/router.go) — HTTP endpoints.
-- [`internal/service/verification_service.go`](/d:/diasoft/pubver/internal/service/verification_service.go) — бизнес-логика проверки и поиска.
-- [`internal/repository/postgres/verification_repository.go`](/d:/diasoft/pubver/internal/repository/postgres/verification_repository.go) — SQL-запросы к PostgreSQL.
-- [`pkg/verifyhash/hash.go`](/d:/diasoft/pubver/pkg/verifyhash/hash.go) — контракт хеширования.
-- [`pkg/verifyhash/jwt.go`](/d:/diasoft/pubver/pkg/verifyhash/jwt.go) — разбор JWT header и payload.
-- [`pkg/verifyhash/signature.go`](/d:/diasoft/pubver/pkg/verifyhash/signature.go) — проверка `RS256` подписи JWT.
+- [`main.go`](/d:/diasoft/pubver/cmd/pubver/main.go) — запуск приложения.
+- [`router.go`](/d:/diasoft/pubver/internal/httpapi/router.go) — HTTP endpoints.
+- [`verification_service.go`](/d:/diasoft/pubver/internal/service/verification_service.go) — бизнес-логика.
+- [`verification_repository.go`](/d:/diasoft/pubver/internal/repository/postgres/verification_repository.go) — SQL к PostgreSQL.
+- [`hash.go`](/d:/diasoft/pubver/pkg/verifyhash/hash.go) — хеширование.
+- [`qr_jwt.go`](/d:/diasoft/pubver/pkg/verifyhash/qr_jwt.go) — разбор QR JWT.
+- [`rs256.go`](/d:/diasoft/pubver/pkg/verifyhash/rs256.go) — проверка `RS256`.

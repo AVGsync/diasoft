@@ -189,6 +189,51 @@ func TestSearchEndpointInvalidInput(t *testing.T) {
 	assertJSONError(t, recorder, domain.ErrInvalidInput.Error())
 }
 
+func TestSearchEndpointReturnsNullPlaceholdersWhenMetadataMissing(t *testing.T) {
+	t.Parallel()
+
+	handler := NewRouter(testLogger(), time.Second, &mockVerificationService{
+		searchFunc: func(context.Context, string, string) (domain.SearchResponse, error) {
+			return domain.SearchResponse{
+				Valid:      true,
+				Status:     domain.DiplomaStatusActive,
+				University: "Bauman Moscow State Technical University",
+				VUZCode:    "bmstu",
+				Year:       nil,
+				Specialty:  nil,
+			}, nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/verify/search?vuz_code=bmstu&diploma_number=DVS-2024-001234", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: got %d want %d", recorder.Code, http.StatusOK)
+	}
+
+	var response map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if _, ok := response["year"]; !ok {
+		t.Fatalf("expected year placeholder in response")
+	}
+	if response["year"] != nil {
+		t.Fatalf("expected year placeholder to be null, got %v", response["year"])
+	}
+
+	if _, ok := response["specialty"]; !ok {
+		t.Fatalf("expected specialty placeholder in response")
+	}
+	if response["specialty"] != nil {
+		t.Fatalf("expected specialty placeholder to be null, got %v", response["specialty"])
+	}
+}
+
 func TestVerifyEndpointPanicRecovery(t *testing.T) {
 	t.Parallel()
 
