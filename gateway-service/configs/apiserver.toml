@@ -1,0 +1,19 @@
+bind_addr = ":8080"
+log_level = "debug"
+public_base_url = "http://localhost:8080"
+jwt_secret = "gateway-access-secret"
+share_jwt_secret = "gateway-share-secret"
+access_token_ttl = "24h"
+share_token_ttl = "72h"
+bootstrap_admin_email = "admin@platform.local"
+bootstrap_admin_password = "admin12345"
+
+[db]
+database_url = "postgres://gateway_user:gateway_password@localhost:5432/gateway_service?sslmode=disable"
+
+[kafka]
+brokers = ["localhost:9092"]
+raw_tasks_topic = "diplomas.raw_tasks"
+processing_results_topic = "diplomas.processing_results"
+consumer_group = "gateway-service"
+client_id = "gateway-service"
