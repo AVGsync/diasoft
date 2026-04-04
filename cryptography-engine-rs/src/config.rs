@@ -24,6 +24,7 @@ pub struct DatabaseConfig {
 #[derive(Deserialize, Clone)]
 pub struct JwtConfig {
     pub auth_hmac_secret: String,
+    pub payload_secret: String,
 }
 
 #[derive(Deserialize, Clone)]

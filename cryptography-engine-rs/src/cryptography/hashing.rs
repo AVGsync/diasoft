@@ -10,6 +10,8 @@ pub struct StudentFieldsForHash<'a> {
     pub full_name: &'a str,
     pub diploma_number: &'a str,
     pub specialty: &'a str,
+    pub degree: &'a str,
+    pub faculty: &'a str,
     pub year: u16,
 }
 
@@ -30,7 +32,7 @@ pub fn hash_diploma(student: &StudentFieldsForHash, vuz_id: Uuid, salt: &str) ->
         vuz_id,
         salt
     );
-    
+
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
     let result = hasher.finalize();
@@ -109,6 +111,8 @@ mod tests {
             full_name: "Ivan Ivanov",
             diploma_number: "ДВС-2024-001234",
             specialty: "Computer Science",
+            degree: "aAafag",
+            faculty: "Agag",
             year: 2024,
         };
         let salt = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
