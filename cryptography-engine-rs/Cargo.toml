@@ -1,0 +1,43 @@
+[package]
+name = "crypto-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+
+rdkafka = { version = "0.36", features = ["cmake-build", "tokio"] }
+
+sha2 = "0.11"
+hex  = "0.4"
+
+ed25519-dalek = { version = "2", features = ["pem", "pkcs8", "rand_core"] }
+pkcs8 = { version = "0.10", features = ["pem"] }
+
+jsonwebtoken = "9"
+
+sqlx = { version = "0.8", features = [
+    "runtime-tokio", "tls-rustls",
+    "postgres", "uuid", "chrono", "macros"
+] }
+
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+config  = "0.14"
+dotenvy = "0.15"
+
+thiserror = "2"
+anyhow    = "1"
+
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+uuid   = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio-stream = "0.1"
+
+aes-gcm = "0.10"
+base64 = "0.22"
+rand = "0.8"
+josekit = "0.10"
