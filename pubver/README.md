@@ -346,14 +346,7 @@ cd d:\diasoft\pubver
 go test ./...
 ```
 
-Покрыты:
-
-- JWT parsing
-- SHA-256 hashing
-- Ed25519 verification
-- service layer
-- HTTP handlers
-- middleware
+Сейчас в репозитории нет `*_test.go` файлов, поэтому эта команда проверяет сборку пакетов и корректность зависимостей.
 
 ## Возможные будущие изменения
 
