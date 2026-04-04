@@ -22,9 +22,3 @@ docker compose up --build
 - Вуз: `demo.vuz@platform.local` / `University123!`
 - Код демо-вуза для публичного поиска: `DEMO2026`
 
-Что изменено в стенде:
-
-- публичная проверка вынесена из `gateway-service` в `pubver`
-- демо-вуз создаётся автоматически при старте `gateway-service`
-- demo signing key подгружается автоматически из [`deploy/demo/demo_university_ed25519_private_key.pem`](/D:/Project_Go/diasoft/deploy/demo/demo_university_ed25519_private_key.pem)
-- фронтенд проксирует запросы на `gateway-service` и `pubver`, поэтому отдельная CORS-настройка не нужна
