@@ -1,46 +1,20 @@
-package httpapi
+package middleware
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"runtime/debug"
 	"strings"
 	"time"
 
+	"github.com/diasoft/gateway-service/internal/authctx"
 	"github.com/redis/go-redis/v9"
 )
 
-type statusRecorder struct {
-	http.ResponseWriter
-	statusCode int
-}
-
-func (r *statusRecorder) WriteHeader(statusCode int) {
-	r.statusCode = statusCode
-	r.ResponseWriter.WriteHeader(statusCode)
-}
-
-func (r *statusRecorder) Unwrap() http.ResponseWriter {
-	return r.ResponseWriter
-}
-
-type RateLimitPolicy struct {
-	Name           string
-	RequestsPerSec float64
-	Burst          int
-}
-
 type RateLimitConfig struct {
 	Enabled           bool
-	VerifyRPS         float64
-	VerifyBurst       int
-	SearchRPS         float64
-	SearchBurst       int
 	KeyTTL            time.Duration
 	TrustedProxyCIDRs []string
 	Redis             RedisConfig
@@ -56,18 +30,24 @@ type RedisConfig struct {
 	WriteTimeout time.Duration
 }
 
+type RateLimitPolicy struct {
+	Name           string
+	RequestsPerSec float64
+	Burst          int
+}
+
+type SubjectResolver func(r *http.Request, clientIP string) string
+
 type RateLimiter struct {
 	logger            *slog.Logger
 	redisClient       *redis.Client
 	keyPrefix         string
 	keyTTL            time.Duration
 	trustedProxies    []netip.Prefix
-	verifyPolicy      RateLimitPolicy
-	searchPolicy      RateLimitPolicy
 	tokenBucketScript *redis.Script
 }
 
-var redisTokenBucketScript = redis.NewScript(`
+var tokenBucketScript = redis.NewScript(`
 local key = KEYS[1]
 local now = tonumber(ARGV[1])
 local refill = tonumber(ARGV[2])
@@ -114,6 +94,15 @@ func NewRateLimiter(ctx context.Context, logger *slog.Logger, cfg RateLimitConfi
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	if strings.TrimSpace(cfg.Redis.Addr) == "" {
+		return nil, fmt.Errorf("RATE_LIMIT_REDIS_ADDR must be set when rate limiting is enabled")
+	}
+	if cfg.KeyTTL <= 0 {
+		return nil, fmt.Errorf("RATE_LIMIT_KEY_TTL must be greater than zero when rate limiting is enabled")
+	}
 
 	trustedProxies, err := parseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs)
 	if err != nil {
@@ -137,22 +126,12 @@ func NewRateLimiter(ctx context.Context, logger *slog.Logger, cfg RateLimitConfi
 	}
 
 	return &RateLimiter{
-		logger:         logger,
-		redisClient:    redisClient,
-		keyPrefix:      cfg.Redis.KeyPrefix,
-		keyTTL:         cfg.KeyTTL,
-		trustedProxies: trustedProxies,
-		verifyPolicy: RateLimitPolicy{
-			Name:           "verify",
-			RequestsPerSec: cfg.VerifyRPS,
-			Burst:          cfg.VerifyBurst,
-		},
-		searchPolicy: RateLimitPolicy{
-			Name:           "search",
-			RequestsPerSec: cfg.SearchRPS,
-			Burst:          cfg.SearchBurst,
-		},
-		tokenBucketScript: redisTokenBucketScript,
+		logger:            logger,
+		redisClient:       redisClient,
+		keyPrefix:         cfg.Redis.KeyPrefix,
+		keyTTL:            cfg.KeyTTL,
+		trustedProxies:    trustedProxies,
+		tokenBucketScript: tokenBucketScript,
 	}, nil
 }
 
@@ -160,99 +139,62 @@ func (l *RateLimiter) Close() error {
 	if l == nil || l.redisClient == nil {
 		return nil
 	}
-
 	return l.redisClient.Close()
 }
 
-func withLogging(logger *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		recorder := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+func (l *RateLimiter) Middleware(policy RateLimitPolicy, resolver SubjectResolver) func(http.Handler) http.Handler {
+	if l == nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
 
-		next.ServeHTTP(recorder, r)
-
-		logger.Info(
-			"http request",
-			"request_id", requestIDFromContext(r.Context()),
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", recorder.statusCode,
-			"duration_ms", time.Since(start).Milliseconds(),
-			"remote_addr", r.RemoteAddr,
-		)
-	})
-}
-
-func withRecover(logger *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				logger.Error(
-					"panic recovered",
-					"request_id", requestIDFromContext(r.Context()),
-					"panic", fmt.Sprint(recovered),
-					"stack", string(debug.Stack()),
-				)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			clientIP := l.extractClientIP(r)
+			subject := resolver(r, clientIP)
+			if strings.TrimSpace(subject) == "" {
+				subject = "ip:" + clientIP
 			}
-		}()
 
-		next.ServeHTTP(w, r)
-	})
-}
+			allowed, retryAfter, err := l.allow(r.Context(), policy, subject)
+			if err != nil {
+				l.logger.Error("rate limit backend failed", "policy", policy.Name, "subject", subject, "error", err)
+				http.Error(w, "rate limiter unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if !allowed {
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
 
-func withRateLimit(limiter *RateLimiter, next http.Handler) http.Handler {
-	if limiter == nil {
-		return next
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		policy, ok := limiter.policyForPath(r.URL.Path)
-		if !ok {
 			next.ServeHTTP(w, r)
-			return
-		}
-
-		clientIP := limiter.extractClientIP(r)
-		subjectKey := "ip:" + clientIP
-
-		allowed, retryAfter, err := limiter.allow(r.Context(), policy, subjectKey)
-		if err != nil {
-			limiter.logger.Error("rate limit backend failed", "client_ip", clientIP, "path", r.URL.Path, "error", err)
-			writeRateLimitUnavailable(w)
-			return
-		}
-		if !allowed {
-			limiter.logger.Warn("rate limit exceeded", "client_ip", clientIP, "path", r.URL.Path, "retry_after_sec", retryAfter, "policy", policy.Name)
-			writeRateLimitExceeded(w, retryAfter)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func withRequestID(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" {
-			requestID = newRequestID()
-		}
-
-		w.Header().Set("X-Request-ID", requestID)
-		next.ServeHTTP(w, r.WithContext(withRequestIDContext(r.Context(), requestID)))
-	})
-}
-
-func (l *RateLimiter) policyForPath(path string) (RateLimitPolicy, bool) {
-	switch path {
-	case "/api/v1/verify":
-		return l.verifyPolicy, true
-	case "/api/v1/verify/search":
-		return l.searchPolicy, true
-	default:
-		return RateLimitPolicy{}, false
+		})
 	}
+}
+
+func SubjectByClientIP(_ *http.Request, clientIP string) string {
+	return "ip:" + clientIP
+}
+
+func SubjectByAdminOrIP(r *http.Request, clientIP string) string {
+	if adminID, ok := authctx.AdminIDFromContext(r.Context()); ok && strings.TrimSpace(adminID) != "" {
+		return "admin:" + adminID
+	}
+	return SubjectByClientIP(r, clientIP)
+}
+
+func SubjectByUniversityOrIP(r *http.Request, clientIP string) string {
+	if universityID, ok := authctx.UniversityIDFromContext(r.Context()); ok && strings.TrimSpace(universityID) != "" {
+		return "university:" + universityID
+	}
+	return SubjectByClientIP(r, clientIP)
+}
+
+func SubjectByAPIKeyOrUniversityOrIP(r *http.Request, clientIP string) string {
+	if apiKeyID, ok := authctx.APIKeyIDFromContext(r.Context()); ok && strings.TrimSpace(apiKeyID) != "" {
+		return "api_key:" + apiKeyID
+	}
+	return SubjectByUniversityOrIP(r, clientIP)
 }
 
 func (l *RateLimiter) allow(ctx context.Context, policy RateLimitPolicy, subjectKey string) (bool, int, error) {
@@ -298,13 +240,12 @@ func (l *RateLimiter) extractClientIP(r *http.Request) string {
 	if !ok {
 		return strings.TrimSpace(r.RemoteAddr)
 	}
-
 	if !l.isTrustedProxy(peerIP) {
 		return peerIP.String()
 	}
 
 	if forwardedFor := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwardedFor != "" {
-		candidates := splitAndTrimCommaSeparated(forwardedFor)
+		candidates := splitAndTrim(forwardedFor)
 		for i := len(candidates) - 1; i >= 0; i-- {
 			if candidateIP, ok := parseIP(candidates[i]); ok && !l.isTrustedProxy(candidateIP) {
 				return candidateIP.String()
@@ -332,17 +273,7 @@ func (l *RateLimiter) isTrustedProxy(addr netip.Addr) bool {
 			return true
 		}
 	}
-
 	return false
-}
-
-func writeRateLimitExceeded(w http.ResponseWriter, retryAfterSeconds int) {
-	w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSeconds))
-	writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
-}
-
-func writeRateLimitUnavailable(w http.ResponseWriter) {
-	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "rate limiter unavailable"})
 }
 
 func parseTrustedProxyCIDRs(values []string) ([]netip.Prefix, error) {
@@ -384,25 +315,12 @@ func parseIP(value string) (netip.Addr, bool) {
 	if addrPort, err := netip.ParseAddrPort(trimmed); err == nil {
 		return addrPort.Addr(), true
 	}
+
 	addr, err := netip.ParseAddr(trimmed)
 	if err != nil {
 		return netip.Addr{}, false
 	}
-
 	return addr, true
-}
-
-func splitAndTrimCommaSeparated(value string) []string {
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-
-	return result
 }
 
 func anyToInt(value any) (int, error) {
@@ -412,13 +330,12 @@ func anyToInt(value any) (int, error) {
 	case int:
 		return typed, nil
 	case string:
-		parsed := strings.TrimSpace(typed)
-		if parsed == "" {
-			return 0, fmt.Errorf("empty string in redis result")
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0, fmt.Errorf("empty redis script result")
 		}
 		var result int
-		_, err := fmt.Sscanf(parsed, "%d", &result)
-		if err != nil {
+		if _, err := fmt.Sscanf(trimmed, "%d", &result); err != nil {
 			return 0, fmt.Errorf("parse redis result %q: %w", typed, err)
 		}
 		return result, nil
@@ -427,11 +344,14 @@ func anyToInt(value any) (int, error) {
 	}
 }
 
-func newRequestID() string {
-	buffer := make([]byte, 12)
-	if _, err := rand.Read(buffer); err != nil {
-		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+func splitAndTrim(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
 	}
-
-	return hex.EncodeToString(buffer)
+	return result
 }

@@ -68,3 +68,30 @@ func TestDeriveJWTEncKeyFallsBackToSHA256(t *testing.T) {
 		t.Fatalf("len(key) = %d, want 32", len(key))
 	}
 }
+
+func TestLoadRejectsEnabledRateLimitWithoutRedisAddr(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/diasoft?sslmode=disable")
+	t.Setenv("JWT_ENC_SECRET", "plain-secret")
+	t.Setenv("RATE_LIMIT_ENABLED", "true")
+	t.Setenv("RATE_LIMIT_REDIS_ADDR", "")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want non-nil")
+	}
+}
+
+func TestLoadAcceptsConfiguredRedisRateLimiter(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/diasoft?sslmode=disable")
+	t.Setenv("JWT_ENC_SECRET", "plain-secret")
+	t.Setenv("RATE_LIMIT_ENABLED", "true")
+	t.Setenv("RATE_LIMIT_REDIS_ADDR", "localhost:6379")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.RateLimit.Redis.Addr != "localhost:6379" {
+		t.Fatalf("RateLimit.Redis.Addr = %q, want %q", cfg.RateLimit.Redis.Addr, "localhost:6379")
+	}
+}

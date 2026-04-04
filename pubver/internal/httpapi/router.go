@@ -18,20 +18,12 @@ type verificationService interface {
 	Search(ctx context.Context, vuzCode, diplomaNumber string) (domain.SearchResponse, error)
 }
 
-type RateLimitConfig struct {
-	Enabled         bool
-	RequestsPerSec  float64
-	Burst           int
-	VisitorTTL      time.Duration
-	CleanupInterval time.Duration
-}
-
 type Router struct {
 	logger  *slog.Logger
 	service verificationService
 }
 
-func NewRouter(logger *slog.Logger, requestTimeout time.Duration, rateLimitConfig RateLimitConfig, verificationService verificationService) http.Handler {
+func NewRouter(logger *slog.Logger, requestTimeout time.Duration, limiter *RateLimiter, verificationService verificationService) http.Handler {
 	handler := &Router{
 		logger:  logger,
 		service: verificationService,
@@ -43,9 +35,7 @@ func NewRouter(logger *slog.Logger, requestTimeout time.Duration, rateLimitConfi
 	mux.HandleFunc("GET /api/v1/verify/search", handler.search)
 
 	httpHandler := http.Handler(mux)
-	if rateLimitConfig.Enabled {
-		httpHandler = withRateLimit(logger, rateLimitConfig, httpHandler)
-	}
+	httpHandler = withRateLimit(limiter, httpHandler)
 
 	return withRequestTimeout(
 		requestTimeout,

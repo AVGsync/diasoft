@@ -15,6 +15,7 @@ import (
 	"github.com/diasoft/gateway-service/internal/infrastructure/excel"
 	kafkainfra "github.com/diasoft/gateway-service/internal/infrastructure/kafka"
 	"github.com/diasoft/gateway-service/internal/infrastructure/qr"
+	"github.com/diasoft/gateway-service/internal/infrastructure/rediscache"
 	"github.com/diasoft/gateway-service/internal/infrastructure/security"
 	"github.com/diasoft/gateway-service/internal/infrastructure/token"
 	"github.com/diasoft/gateway-service/internal/model"
@@ -34,6 +35,8 @@ type APIServer struct {
 	httpServer  *http.Server
 	kafkaWriter *kafkainfra.Producer
 	kafkaReader *kafkainfra.ResultConsumer
+	rateLimiter *httpmw.RateLimiter
+	cache       *rediscache.Client
 }
 
 func New(config *Config) *APIServer {
@@ -94,6 +97,12 @@ func (s *APIServer) Start() error {
 	if s.kafkaWriter != nil {
 		_ = s.kafkaWriter.Close()
 	}
+	if s.rateLimiter != nil {
+		_ = s.rateLimiter.Close()
+	}
+	if s.cache != nil {
+		_ = s.cache.Close()
+	}
 
 	return s.db.Close()
 }
@@ -151,20 +160,85 @@ func (s *APIServer) configureRouter() error {
 		return err
 	}
 
+	adminUseCase := handler.AdminUseCase(adminService)
+	universityUseCase := handler.UniversityCabinetUseCase(universityService)
+	var diplomaUseCase interface {
+		handler.DiplomaUseCase
+		HandleProcessingResult(ctx context.Context, result *model.KafkaProcessingResult) error
+	} = diplomaService
+
+	rateLimiter, err := httpmw.NewRateLimiter(context.Background(), s.logger, httpmw.RateLimitConfig{
+		Enabled:           s.config.RateLimit.Enabled,
+		KeyTTL:            s.config.RateLimit.KeyTTL,
+		TrustedProxyCIDRs: s.config.RateLimit.TrustedProxyCIDRs,
+		Redis: httpmw.RedisConfig{
+			Addr:         s.config.RateLimit.Redis.Addr,
+			Password:     s.config.RateLimit.Redis.Password,
+			DB:           s.config.RateLimit.Redis.DB,
+			KeyPrefix:    s.config.RateLimit.Redis.KeyPrefix,
+			DialTimeout:  s.config.RateLimit.Redis.DialTimeout,
+			ReadTimeout:  s.config.RateLimit.Redis.ReadTimeout,
+			WriteTimeout: s.config.RateLimit.Redis.WriteTimeout,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	s.rateLimiter = rateLimiter
+
+	var cacheClient *rediscache.Client
+	if s.config.Cache != nil && s.config.Cache.Enabled {
+		cacheClient, err = rediscache.New(context.Background(), rediscache.Config{
+			Addr:         s.config.Cache.Redis.Addr,
+			Password:     s.config.Cache.Redis.Password,
+			DB:           s.config.Cache.Redis.DB,
+			KeyPrefix:    s.config.Cache.Redis.KeyPrefix,
+			DialTimeout:  s.config.Cache.Redis.DialTimeout,
+			ReadTimeout:  s.config.Cache.Redis.ReadTimeout,
+			WriteTimeout: s.config.Cache.Redis.WriteTimeout,
+		})
+		if err != nil {
+			return err
+		}
+		s.cache = cacheClient
+
+		cacheCfg := service.GatewayCacheConfig{
+			AdminStatsTTL:        s.config.Cache.AdminStatsTTL,
+			UniversitiesListTTL:  s.config.Cache.UniversitiesListTTL,
+			UniversityProfileTTL: s.config.Cache.UniversityProfileTTL,
+			BatchStatusTTL:       s.config.Cache.BatchStatusTTL,
+		}
+
+		adminUseCase = service.NewCachedAdminService(adminService, cacheClient, s.logger, cacheCfg)
+		universityUseCase = service.NewCachedUniversityCabinetService(universityService, cacheClient, s.logger, cacheCfg)
+		diplomaUseCase = service.NewCachedDiplomaService(diplomaService, cacheClient, s.logger, cacheCfg)
+	}
+
 	s.kafkaWriter = kafkaWriter
-	s.kafkaReader = kafkainfra.NewResultConsumer(s.config.Kafka, diplomaService, s.logger)
+	s.kafkaReader = kafkainfra.NewResultConsumer(s.config.Kafka, diplomaUseCase, s.logger)
 
 	authHandler := handler.NewAuthHandler(authService, validator)
-	adminHandler := handler.NewAdminHandler(adminService)
+	adminHandler := handler.NewAdminHandler(adminUseCase)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService, validator)
 	signingKeyHandler := handler.NewSigningKeyHandler(signingKeyService, validator)
-	diplomaHandler := handler.NewDiplomaHandler(diplomaService, validator)
+	diplomaHandler := handler.NewDiplomaHandler(diplomaUseCase, validator)
 	studentHandler := handler.NewStudentHandler(studentService, validator)
-	universityHandler := handler.NewUniversityHandler(universityService)
+	universityHandler := handler.NewUniversityHandler(universityUseCase)
 	authMiddleware := httpmw.New(tokenManager, apiKeyService, s.db.University())
 
+	authRegisterPolicy := httpmw.RateLimitPolicy{Name: "auth_register", RequestsPerSec: 0.05, Burst: 2}
+	authLoginPolicy := httpmw.RateLimitPolicy{Name: "auth_login", RequestsPerSec: 0.1, Burst: 3}
+	studentSearchPolicy := httpmw.RateLimitPolicy{Name: "student_search", RequestsPerSec: 0.1, Burst: 3}
+	studentSharePolicy := httpmw.RateLimitPolicy{Name: "student_share", RequestsPerSec: 0.05, Burst: 2}
+	studentQRPolicy := httpmw.RateLimitPolicy{Name: "student_qr", RequestsPerSec: 0.05, Burst: 2}
+	sharedDiplomaPolicy := httpmw.RateLimitPolicy{Name: "student_shared_link", RequestsPerSec: 0.2, Burst: 5}
+	adminPolicy := httpmw.RateLimitPolicy{Name: "admin", RequestsPerSec: 2, Burst: 20}
+	universityPolicy := httpmw.RateLimitPolicy{Name: "university", RequestsPerSec: 1, Burst: 15}
+	diplomaUploadPolicy := httpmw.RateLimitPolicy{Name: "diploma_upload", RequestsPerSec: 0.1, Burst: 2}
+	diplomaReadPolicy := httpmw.RateLimitPolicy{Name: "diploma_read", RequestsPerSec: 1, Burst: 10}
+	diplomaWritePolicy := httpmw.RateLimitPolicy{Name: "diploma_write", RequestsPerSec: 0.2, Burst: 3}
+
 	s.router.Use(chimw.RequestID)
-	s.router.Use(chimw.RealIP)
 	s.router.Use(chimw.Logger)
 	s.router.Use(chimw.Recoverer)
 
@@ -174,19 +248,20 @@ func (s *APIServer) configureRouter() error {
 	})
 
 	s.router.Route("/api/v1", func(r chi.Router) {
-		r.Post("/auth/register", authHandler.Register())
-		r.Post("/auth/login", authHandler.Login())
+		r.With(rateLimiter.Middleware(authRegisterPolicy, httpmw.SubjectByClientIP)).Post("/auth/register", authHandler.Register())
+		r.With(rateLimiter.Middleware(authLoginPolicy, httpmw.SubjectByClientIP)).Post("/auth/login", authHandler.Login())
 
 		r.Route("/student", func(r chi.Router) {
-			r.Get("/search", studentHandler.Search())
-			r.Post("/share", studentHandler.Share())
-			r.Get("/qr", studentHandler.QR())
-			r.Get("/share/{token}", studentHandler.SharedDiploma())
+			r.With(rateLimiter.Middleware(studentSearchPolicy, httpmw.SubjectByClientIP)).Get("/search", studentHandler.Search())
+			r.With(rateLimiter.Middleware(studentSharePolicy, httpmw.SubjectByClientIP)).Post("/share", studentHandler.Share())
+			r.With(rateLimiter.Middleware(studentQRPolicy, httpmw.SubjectByClientIP)).Get("/qr", studentHandler.QR())
+			r.With(rateLimiter.Middleware(sharedDiplomaPolicy, httpmw.SubjectByClientIP)).Get("/share/{token}", studentHandler.SharedDiploma())
 		})
 
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(authMiddleware.JWT)
 			r.Use(authMiddleware.Admin)
+			r.Use(rateLimiter.Middleware(adminPolicy, httpmw.SubjectByAdminOrIP))
 			r.Get("/universities", adminHandler.ListUniversities())
 			r.Get("/universities/{id}", adminHandler.GetUniversity())
 			r.Post("/universities/{id}/approve", adminHandler.ApproveUniversity())
@@ -198,6 +273,7 @@ func (s *APIServer) configureRouter() error {
 		r.Route("/vuz", func(r chi.Router) {
 			r.Use(authMiddleware.JWT)
 			r.Use(authMiddleware.University)
+			r.Use(rateLimiter.Middleware(universityPolicy, httpmw.SubjectByUniversityOrIP))
 			r.Get("/profile", universityHandler.Profile())
 			r.Get("/batches", universityHandler.ListBatches())
 			r.Post("/api-keys", apiKeyHandler.Create())
@@ -208,10 +284,10 @@ func (s *APIServer) configureRouter() error {
 
 		r.Route("/diplomas", func(r chi.Router) {
 			r.Use(authMiddleware.UniversityOrAPIKey)
-			r.Post("/upload", diplomaHandler.Upload())
-			r.Get("/batches/{batch_id}", diplomaHandler.BatchStatus())
-			r.Get("/batches/{batch_id}/download", diplomaHandler.Download())
-			r.Patch("/{diploma_hash}/revoke", diplomaHandler.Revoke())
+			r.With(rateLimiter.Middleware(diplomaUploadPolicy, httpmw.SubjectByAPIKeyOrUniversityOrIP)).Post("/upload", diplomaHandler.Upload())
+			r.With(rateLimiter.Middleware(diplomaReadPolicy, httpmw.SubjectByAPIKeyOrUniversityOrIP)).Get("/batches/{batch_id}", diplomaHandler.BatchStatus())
+			r.With(rateLimiter.Middleware(diplomaReadPolicy, httpmw.SubjectByAPIKeyOrUniversityOrIP)).Get("/batches/{batch_id}/download", diplomaHandler.Download())
+			r.With(rateLimiter.Middleware(diplomaWritePolicy, httpmw.SubjectByAPIKeyOrUniversityOrIP)).Patch("/{diploma_hash}/revoke", diplomaHandler.Revoke())
 		})
 	})
 

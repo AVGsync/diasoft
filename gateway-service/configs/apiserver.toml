@@ -17,6 +17,36 @@ demo_university_email = ""
 demo_university_password = ""
 demo_university_private_key_path = ""
 
+[rate_limit]
+enabled = true
+key_ttl = "15m"
+trusted_proxy_cidrs = []
+
+[rate_limit.redis]
+addr = "localhost:6379"
+password = ""
+db = 0
+key_prefix = "rl:gateway"
+dial_timeout = "3s"
+read_timeout = "2s"
+write_timeout = "2s"
+
+[cache]
+enabled = false
+admin_stats_ttl = "30s"
+universities_list_ttl = "1m"
+university_profile_ttl = "5m"
+batch_status_ttl = "15s"
+
+[cache.redis]
+addr = "localhost:6379"
+password = ""
+db = 0
+key_prefix = "cache:gateway"
+dial_timeout = "3s"
+read_timeout = "2s"
+write_timeout = "2s"
+
 [db]
 database_url = "postgres://gateway_user:gateway_password@localhost:5432/postgres?sslmode=disable"
 
