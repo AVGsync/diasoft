@@ -16,6 +16,8 @@ type QRClaims struct {
 	DiplomaNumber string
 	StudentName   string
 	Specialty     string
+	Degree        string
+	Faculty       string
 	Year          int
 	Salt          string
 }
@@ -25,6 +27,8 @@ func (c QRClaims) HashInput() DiplomaHashInput {
 		FullName:      c.StudentName,
 		DiplomaNumber: c.DiplomaNumber,
 		Specialty:     c.Specialty,
+		Degree:        c.Degree,
+		Faculty:       c.Faculty,
 		Year:          c.Year,
 		VUZID:         c.VUZID,
 		Salt:          c.Salt,
@@ -68,6 +72,14 @@ func ExtractQRClaimsFromMap(claims map[string]any) (QRClaims, error) {
 	if err != nil {
 		return QRClaims{}, err
 	}
+	degree, err := extractStringClaim(claims, "degree")
+	if err != nil {
+		return QRClaims{}, err
+	}
+	faculty, err := extractStringClaim(claims, "faculty")
+	if err != nil {
+		return QRClaims{}, err
+	}
 	salt, err := extractStringClaim(claims, "salt")
 	if err != nil {
 		return QRClaims{}, err
@@ -80,6 +92,8 @@ func ExtractQRClaimsFromMap(claims map[string]any) (QRClaims, error) {
 		DiplomaNumber: diplomaNumber,
 		StudentName:   studentName,
 		Specialty:     specialty,
+		Degree:        degree,
+		Faculty:       faculty,
 		Year:          year,
 		Salt:          salt,
 	}, nil

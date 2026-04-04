@@ -13,14 +13,14 @@ paths:
           description: Service is healthy
   /api/v1/verify:
     get:
-      summary: Verify diploma by RS256-signed QR JWT
+      summary: Verify diploma by EdDSA-signed QR JWT
       parameters:
         - in: query
           name: payload
           required: true
           schema:
             type: string
-          description: JWT from QR code with flat diploma claims
+          description: JWT from QR code with flat diploma claims and Ed25519 signature
       responses:
         "200":
           description: Verification result

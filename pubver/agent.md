@@ -4,8 +4,8 @@
 
 Public verification uses only:
 
-1. `RS256` verification of the QR JWT.
-2. Recomputed `SHA-256(full_name|diploma_number|specialty|year|vuz_id|salt)`.
+1. `EdDSA` verification of the QR JWT.
+2. Recomputed `SHA-256(full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)`.
 3. Lookup in `diploma_hashes`.
 
 `diploma_hashes.signature` is not used by the public verification flow.
@@ -29,13 +29,15 @@ Important fields:
 - `diploma_hashes.status`
 - `diploma_hashes.revoked_at`
 
+`universities.public_key` is expected to contain an `Ed25519` public key.
+
 ## Temporary placeholders
 
 `year` and `specialty` are intentionally kept in:
 
-- domain models;
-- JSON responses;
-- OpenAPI schema.
+- domain models
+- JSON responses
+- OpenAPI schema
 
 For now they are not stored in PostgreSQL and are returned as `null` placeholders.
 
@@ -49,9 +51,9 @@ For now they are not stored in PostgreSQL and are returned as `null` placeholder
 2. Decode payload without trust.
 3. Extract `vuz_id`.
 4. Load `universities.public_key`.
-5. Verify JWT with `RS256`.
-6. Extract full claims.
-7. Recompute SHA-256.
+5. Verify JWT with `EdDSA` / `Ed25519`.
+6. Extract full claims, including `degree` and `faculty`.
+7. Recompute `SHA-256`.
 8. Compare with `sub` and `diploma_hash`.
 9. Lookup `diploma_hashes.hash`.
 10. Return public result.
@@ -62,3 +64,13 @@ For now they are not stored in PostgreSQL and are returned as `null` placeholder
 2. Read `diploma_number`.
 3. Query `universities.vuz_code + diploma_hashes.diploma_number`.
 4. Return status and placeholder metadata fields.
+
+## Stub mode
+
+When `USE_STUB_DATA=true`, the service:
+
+- does not connect to PostgreSQL
+- serves built-in active and revoked diploma scenarios
+- logs ready-to-use URLs and JWT tokens for Postman
+
+Stub JWTs are signed with a fresh in-memory `Ed25519` keypair on every startup, so tokens are valid only for the current run.

@@ -40,7 +40,7 @@ func main() {
 	}
 	defer cleanup()
 
-	verificationService := service.NewVerificationService(repo)
+	verificationService := service.NewVerificationService(repo, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

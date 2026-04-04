@@ -2,10 +2,8 @@ package stub
 
 import (
 	"context"
-	"crypto"
+	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -33,12 +31,12 @@ type VerificationRepository struct {
 }
 
 func NewVerificationRepository() (*VerificationRepository, Scenario, error) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, Scenario{}, fmt.Errorf("generate stub rsa keypair: %w", err)
+		return nil, Scenario{}, fmt.Errorf("generate stub ed25519 keypair: %w", err)
 	}
 
-	publicKeyDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	publicKeyDER, err := x509.MarshalPKIXPublicKey(publicKey)
 	if err != nil {
 		return nil, Scenario{}, fmt.Errorf("marshal stub public key: %w", err)
 	}
@@ -54,9 +52,11 @@ func NewVerificationRepository() (*VerificationRepository, Scenario, error) {
 		VUZID:         "550e8400-e29b-41d4-a716-446655440000",
 		VUZCode:       "001X7276",
 		University:    "Bauman Moscow State Technical University",
-		FullName:      "Иванов Иван Иванович",
-		DiplomaNumber: "ДВС-2024-001234",
-		Specialty:     "Программная инженерия",
+		FullName:      "Ivanov Ivan Ivanovich",
+		DiplomaNumber: "DVS-2024-001234",
+		Specialty:     "Software Engineering",
+		Degree:        "Bachelor",
+		Faculty:       "FKN",
 		Year:          2024,
 		Salt:          "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
 		Status:        domain.DiplomaStatusActive,
@@ -69,9 +69,11 @@ func NewVerificationRepository() (*VerificationRepository, Scenario, error) {
 		VUZID:         "550e8400-e29b-41d4-a716-446655440001",
 		VUZCode:       "002X7277",
 		University:    "Saint Petersburg State University",
-		FullName:      "Петров Петр Петрович",
-		DiplomaNumber: "ДВС-2023-009999",
-		Specialty:     "Информационные системы",
+		FullName:      "Petrov Petr Petrovich",
+		DiplomaNumber: "DVS-2023-009999",
+		Specialty:     "Information Systems",
+		Degree:        "Master",
+		Faculty:       "Mathematics and Mechanics",
 		Year:          2023,
 		Salt:          "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
 		Status:        domain.DiplomaStatusRevoked,
@@ -99,7 +101,12 @@ func (r *VerificationRepository) FindByDiplomaNumber(_ context.Context, vuzCode,
 }
 
 func (r *VerificationRepository) FindUniversityVerificationKeyByID(_ context.Context, vuzID string) (*domain.UniversityVerificationKey, error) {
-	return r.verificationKeys[vuzID], nil
+	verificationKey := r.verificationKeys[vuzID]
+	if verificationKey == nil {
+		return nil, domain.ErrUniversityVerificationKeyNotFound
+	}
+
+	return verificationKey, nil
 }
 
 type scenarioInput struct {
@@ -109,6 +116,8 @@ type scenarioInput struct {
 	FullName      string
 	DiplomaNumber string
 	Specialty     string
+	Degree        string
+	Faculty       string
 	Year          int
 	Salt          string
 	Status        domain.DiplomaStatus
@@ -120,11 +129,13 @@ type scenarioResult struct {
 	Token         string
 }
 
-func (r *VerificationRepository) addScenario(privateKey *rsa.PrivateKey, publicKeyPEM string, input scenarioInput) (scenarioResult, error) {
+func (r *VerificationRepository) addScenario(privateKey ed25519.PrivateKey, publicKeyPEM string, input scenarioInput) (scenarioResult, error) {
 	hash, err := verifyhash.HashDiplomaInput(verifyhash.DiplomaHashInput{
 		FullName:      input.FullName,
 		DiplomaNumber: input.DiplomaNumber,
 		Specialty:     input.Specialty,
+		Degree:        input.Degree,
+		Faculty:       input.Faculty,
 		Year:          input.Year,
 		VUZID:         input.VUZID,
 		Salt:          input.Salt,
@@ -133,13 +144,15 @@ func (r *VerificationRepository) addScenario(privateKey *rsa.PrivateKey, publicK
 		return scenarioResult{}, fmt.Errorf("hash stub diploma input: %w", err)
 	}
 
-	token, err := createRS256JWT(privateKey, map[string]any{
+	token, err := createEd25519JWT(privateKey, map[string]any{
 		"sub":            hash,
 		"diploma_hash":   hash,
 		"vuz_id":         input.VUZID,
 		"diploma_number": input.DiplomaNumber,
 		"student_name":   input.FullName,
 		"specialty":      input.Specialty,
+		"degree":         input.Degree,
+		"faculty":        input.Faculty,
 		"year":           input.Year,
 		"salt":           input.Salt,
 		"iat":            time.Now().Unix(),
@@ -174,8 +187,8 @@ func (r *VerificationRepository) addScenario(privateKey *rsa.PrivateKey, publicK
 	}, nil
 }
 
-func createRS256JWT(privateKey *rsa.PrivateKey, payload map[string]any) (string, error) {
-	headerEncoded := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+func createEd25519JWT(privateKey ed25519.PrivateKey, payload map[string]any) (string, error) {
+	headerEncoded := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`))
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -184,11 +197,6 @@ func createRS256JWT(privateKey *rsa.PrivateKey, payload map[string]any) (string,
 	bodyEncoded := base64.RawURLEncoding.EncodeToString(payloadBytes)
 	signingInput := headerEncoded + "." + bodyEncoded
 
-	digest := sha256.Sum256([]byte(signingInput))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, digest[:])
-	if err != nil {
-		return "", err
-	}
-
+	signature := ed25519.Sign(privateKey, []byte(signingInput))
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }

@@ -12,6 +12,8 @@ type DiplomaHashInput struct {
 	FullName      string
 	DiplomaNumber string
 	Specialty     string
+	Degree        string
+	Faculty       string
 	Year          int
 	VUZID         string
 	Salt          string
@@ -25,6 +27,10 @@ func (i DiplomaHashInput) Validate() error {
 		return fmt.Errorf("diploma_number must not be empty")
 	case strings.TrimSpace(i.Specialty) == "":
 		return fmt.Errorf("specialty must not be empty")
+	case strings.TrimSpace(i.Degree) == "":
+		return fmt.Errorf("degree must not be empty")
+	case strings.TrimSpace(i.Faculty) == "":
+		return fmt.Errorf("faculty must not be empty")
 	case i.Year <= 0:
 		return fmt.Errorf("year must be a positive integer")
 	case strings.TrimSpace(i.VUZID) == "":
@@ -55,6 +61,8 @@ func BuildRawDiplomaString(input DiplomaHashInput) (string, error) {
 		strings.TrimSpace(input.FullName),
 		strings.TrimSpace(input.DiplomaNumber),
 		strings.TrimSpace(input.Specialty),
+		strings.TrimSpace(input.Degree),
+		strings.TrimSpace(input.Faculty),
 		strconv.Itoa(input.Year),
 		strings.TrimSpace(input.VUZID),
 		strings.TrimSpace(input.Salt),

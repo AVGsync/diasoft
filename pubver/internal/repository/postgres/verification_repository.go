@@ -52,10 +52,14 @@ func (r *VerificationRepository) FindUniversityVerificationKeyByID(ctx context.C
 	).Scan(&publicKey)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+			return nil, domain.ErrUniversityVerificationKeyNotFound
 		}
 
 		return nil, err
+	}
+
+	if !publicKey.Valid || publicKey.String == "" {
+		return nil, domain.ErrUniversityVerificationKeyNotFound
 	}
 
 	verificationKey.PublicKey = publicKey.String
