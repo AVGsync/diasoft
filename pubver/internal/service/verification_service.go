@@ -14,9 +14,10 @@ import (
 type VerificationService struct {
 	repo   repository.VerificationRepository
 	logger *slog.Logger
+	encKey []byte
 }
 
-func NewVerificationService(repo repository.VerificationRepository, logger *slog.Logger) *VerificationService {
+func NewVerificationService(repo repository.VerificationRepository, logger *slog.Logger, encKey []byte) *VerificationService {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -24,6 +25,7 @@ func NewVerificationService(repo repository.VerificationRepository, logger *slog
 	return &VerificationService{
 		repo:   repo,
 		logger: logger,
+		encKey: append([]byte(nil), encKey...),
 	}
 }
 
@@ -61,46 +63,48 @@ func (s *VerificationService) VerifyPayload(ctx context.Context, token string) (
 		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, err)
 	}
 
-	claims, err := verifyhash.ExtractQRClaimsFromMap(claimsMap)
+	outerClaims, err := verifyhash.ExtractOuterQRClaimsFromMap(claimsMap)
 	if err != nil {
-		s.logger.Warn("verification payload rejected", "reason", "invalid_claims", "vuz_id", vuzID, "error", err)
+		s.logger.Warn("verification payload rejected", "reason", "invalid_outer_claims", "vuz_id", vuzID, "error", err)
 		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, err)
 	}
 
-	hash, err := verifyhash.HashDiplomaInput(claims.HashInput())
+	diplomaPayload, err := verifyhash.DecryptEncryptedDiplomaPayload(outerClaims.Enc, s.encKey)
+	if err != nil {
+		s.logger.Warn("verification payload rejected", "reason", "decrypt_enc_failed", "vuz_id", vuzID, "error", err)
+		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, err)
+	}
+
+	hash, err := verifyhash.HashDiplomaInput(diplomaPayload.HashInput(outerClaims.VUZID))
 	if err != nil {
 		s.logger.Warn("verification payload rejected", "reason", "hash_recompute_failed", "vuz_id", vuzID, "error", err)
 		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, err)
 	}
-	if !strings.EqualFold(claims.DiplomaHash, hash) {
+	if !strings.EqualFold(outerClaims.DiplomaHash, hash) {
 		s.logger.Warn("verification payload rejected", "reason", "diploma_hash_mismatch", "vuz_id", vuzID)
 		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, domain.ErrDiplomaHashClaimMismatch)
 	}
-	if !strings.EqualFold(claims.Sub, hash) {
+	if !strings.EqualFold(outerClaims.Sub, hash) {
 		s.logger.Warn("verification payload rejected", "reason", "sub_mismatch", "vuz_id", vuzID)
 		return domain.VerifyResponse{}, errors.Join(domain.ErrInvalidPayload, domain.ErrSubClaimMismatch)
 	}
 
 	record, err := s.repo.FindByHash(ctx, hash)
 	if err != nil {
+		if errors.Is(err, domain.ErrDiplomaRecordNotFound) {
+			s.logger.Warn("diploma not found in registry", "hash", hash, "vuz_id", vuzID)
+			return domain.VerifyResponse{
+				Valid:  false,
+				Status: domain.DiplomaStatusNotFound,
+				Hash:   hash,
+			}, nil
+		}
+
 		s.logger.Error("find diploma by hash", "hash", hash, "vuz_id", vuzID, "error", err)
 		return domain.VerifyResponse{}, err
 	}
 
-	if record == nil {
-		s.logger.Warn("diploma not found in registry", "hash", hash, "vuz_id", vuzID)
-		return domain.VerifyResponse{
-			Valid:     false,
-			Status:    domain.DiplomaStatusNotFound,
-			Hash:      hash,
-			Year:      intPtr(claims.Year),
-			Specialty: stringPtr(claims.Specialty),
-			Degree:    stringPtr(claims.Degree),
-			Faculty:   stringPtr(claims.Faculty),
-		}, nil
-	}
-
-	return toVerifyResponse(record, claims), nil
+	return toVerifyResponse(record), nil
 }
 
 func (s *VerificationService) Search(ctx context.Context, vuzCode, diplomaNumber string) (domain.SearchResponse, error) {
@@ -112,15 +116,15 @@ func (s *VerificationService) Search(ctx context.Context, vuzCode, diplomaNumber
 
 	record, err := s.repo.FindByDiplomaNumber(ctx, vuzCode, diplomaNumber)
 	if err != nil {
+		if errors.Is(err, domain.ErrDiplomaRecordNotFound) {
+			return domain.SearchResponse{
+				Valid:  false,
+				Status: domain.DiplomaStatusNotFound,
+			}, nil
+		}
+
 		s.logger.Error("find diploma by number", "vuz_code", vuzCode, "diploma_number", diplomaNumber, "error", err)
 		return domain.SearchResponse{}, err
-	}
-
-	if record == nil {
-		return domain.SearchResponse{
-			Valid:  false,
-			Status: domain.DiplomaStatusNotFound,
-		}, nil
 	}
 
 	return domain.SearchResponse{
@@ -135,8 +139,8 @@ func (s *VerificationService) Search(ctx context.Context, vuzCode, diplomaNumber
 	}, nil
 }
 
-func toVerifyResponse(record *domain.DiplomaRecord, claims verifyhash.QRClaims) domain.VerifyResponse {
-	response := domain.VerifyResponse{
+func toVerifyResponse(record *domain.DiplomaRecord) domain.VerifyResponse {
+	return domain.VerifyResponse{
 		Valid:         record.Status == domain.DiplomaStatusActive,
 		Status:        record.Status,
 		Hash:          record.Hash,
@@ -149,34 +153,4 @@ func toVerifyResponse(record *domain.DiplomaRecord, claims verifyhash.QRClaims) 
 		Faculty:       record.Faculty,
 		RevokedAt:     record.RevokedAt,
 	}
-
-	if strings.TrimSpace(claims.Specialty) != "" {
-		response.Specialty = stringPtr(claims.Specialty)
-	}
-	if strings.TrimSpace(claims.Degree) != "" {
-		response.Degree = stringPtr(claims.Degree)
-	}
-	if strings.TrimSpace(claims.Faculty) != "" {
-		response.Faculty = stringPtr(claims.Faculty)
-	}
-	response.Year = intPtr(claims.Year)
-
-	return response
-}
-
-func stringPtr(value string) *string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return nil
-	}
-
-	return &trimmed
-}
-
-func intPtr(value int) *int {
-	if value == 0 {
-		return nil
-	}
-
-	return &value
 }

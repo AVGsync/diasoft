@@ -9,103 +9,53 @@ import (
 	"strings"
 )
 
-type QRClaims struct {
-	Sub           string
-	DiplomaHash   string
-	VUZID         string
-	DiplomaNumber string
-	StudentName   string
-	Specialty     string
-	Degree        string
-	Faculty       string
-	Year          int
-	Salt          string
-	IssuedAt      int64
+type OuterQRClaims struct {
+	Sub         string
+	DiplomaHash string
+	VUZID       string
+	Enc         string
+	IssuedAt    int64
 }
 
-func (c QRClaims) HashInput() DiplomaHashInput {
-	return DiplomaHashInput{
-		FullName:      c.StudentName,
-		DiplomaNumber: c.DiplomaNumber,
-		Specialty:     c.Specialty,
-		Degree:        c.Degree,
-		Faculty:       c.Faculty,
-		Year:          c.Year,
-		VUZID:         c.VUZID,
-		Salt:          c.Salt,
-	}
-}
-
-func ExtractQRClaims(token string) (QRClaims, error) {
+func ExtractOuterQRClaims(token string) (OuterQRClaims, error) {
 	claims, err := DecodeUnverifiedJWT(token)
 	if err != nil {
-		return QRClaims{}, err
+		return OuterQRClaims{}, err
 	}
 
-	return ExtractQRClaimsFromMap(claims)
+	return ExtractOuterQRClaimsFromMap(claims)
 }
 
-func ExtractQRClaimsFromMap(claims map[string]any) (QRClaims, error) {
+func ExtractOuterQRClaimsFromMap(claims map[string]any) (OuterQRClaims, error) {
 	vuzID, err := ExtractVUZIDFromMap(claims)
 	if err != nil {
-		return QRClaims{}, err
-	}
-
-	year, err := extractIntClaim(claims, "year")
-	if err != nil {
-		return QRClaims{}, err
+		return OuterQRClaims{}, err
 	}
 
 	issuedAt, err := extractInt64Claim(claims, "iat")
 	if err != nil {
-		return QRClaims{}, err
+		return OuterQRClaims{}, err
 	}
 
 	sub, err := extractStringClaim(claims, "sub")
 	if err != nil {
-		return QRClaims{}, err
+		return OuterQRClaims{}, err
 	}
-	diplomaHash, err := extractStringClaim(claims, "diploma_hash")
-	if err != nil {
-		return QRClaims{}, err
+	diplomaHash := optionalStringClaim(claims, "diploma_hash")
+	if diplomaHash == "" {
+		diplomaHash = sub
 	}
-	studentName, err := extractStringClaim(claims, "student_name")
+	enc, err := extractStringClaim(claims, "enc")
 	if err != nil {
-		return QRClaims{}, err
-	}
-	diplomaNumber, err := extractStringClaim(claims, "diploma_number")
-	if err != nil {
-		return QRClaims{}, err
-	}
-	specialty, err := extractStringClaim(claims, "specialty")
-	if err != nil {
-		return QRClaims{}, err
-	}
-	degree, err := extractStringClaim(claims, "degree")
-	if err != nil {
-		return QRClaims{}, err
-	}
-	faculty, err := extractStringClaim(claims, "faculty")
-	if err != nil {
-		return QRClaims{}, err
-	}
-	salt, err := extractStringClaim(claims, "salt")
-	if err != nil {
-		return QRClaims{}, err
+		return OuterQRClaims{}, err
 	}
 
-	return QRClaims{
-		Sub:           sub,
-		DiplomaHash:   diplomaHash,
-		VUZID:         vuzID,
-		DiplomaNumber: diplomaNumber,
-		StudentName:   studentName,
-		Specialty:     specialty,
-		Degree:        degree,
-		Faculty:       faculty,
-		Year:          year,
-		Salt:          salt,
-		IssuedAt:      issuedAt,
+	return OuterQRClaims{
+		Sub:         sub,
+		DiplomaHash: diplomaHash,
+		VUZID:       vuzID,
+		Enc:         enc,
+		IssuedAt:    issuedAt,
 	}, nil
 }
 
@@ -206,29 +156,18 @@ func extractStringClaim(claims map[string]any, key string) (string, error) {
 	return strings.TrimSpace(value), nil
 }
 
-func extractIntClaim(claims map[string]any, key string) (int, error) {
+func optionalStringClaim(claims map[string]any, key string) string {
 	rawValue, ok := claims[key]
 	if !ok {
-		return 0, fmt.Errorf("claim %q is missing", key)
+		return ""
 	}
 
-	switch typed := rawValue.(type) {
-	case json.Number:
-		parsed, err := typed.Int64()
-		if err != nil {
-			return 0, fmt.Errorf("claim %q must be an integer", key)
-		}
-		return int(parsed), nil
-	case float64:
-		if math.Trunc(typed) != typed {
-			return 0, fmt.Errorf("claim %q must be an integer", key)
-		}
-		return int(typed), nil
-	case int:
-		return typed, nil
-	default:
-		return 0, fmt.Errorf("claim %q must be an integer", key)
+	value, ok := rawValue.(string)
+	if !ok {
+		return ""
 	}
+
+	return strings.TrimSpace(value)
 }
 
 func extractInt64Claim(claims map[string]any, key string) (int64, error) {
@@ -247,6 +186,10 @@ func extractInt64Claim(claims map[string]any, key string) (int64, error) {
 	case float64:
 		if math.Trunc(typed) != typed {
 			return 0, fmt.Errorf("claim %q must be an integer", key)
+		}
+		const maxSafeJSONInteger = 1 << 53
+		if typed > maxSafeJSONInteger || typed < -maxSafeJSONInteger {
+			return 0, fmt.Errorf("claim %q exceeds safe integer range", key)
 		}
 		return int64(typed), nil
 	case int:

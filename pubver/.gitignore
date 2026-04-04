@@ -5,7 +5,7 @@
 *.dylib
 /pubver
 /bin/
-
+/rustutil/
 *.test
 
 *.out

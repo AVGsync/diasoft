@@ -2,106 +2,86 @@
 
 ## Роль сервиса
 
-`pubver` - внешний read-only сервис для публичной проверки диплома после сканирования QR-кода и для ограниченного поиска по номеру диплома.
+`pubver` - внешний read-only сервис публичной проверки дипломов.
 
-Сервис:
+Он:
 
-- не пишет в реестр дипломов
-- не работает с Kafka
-- не обрабатывает batch upload
-- не расшифровывает `encrypted_payload`
+- не пишет в реестр
+- не читает Kafka
+- не расшифровывает `encrypted_payload` из `batch_results`
 - не меняет статус диплома
-- проверяет `EdDSA` подпись QR JWT
-- пересчитывает хеш и сверяет его с реестром
+- проверяет `EdDSA` подпись JWT
+- расшифровывает claim `enc` через `A256GCM`
+- пересчитывает `SHA-256`
+- сверяет хеш с реестром
 
-Сервис работает только через реальную `PostgreSQL`.
+## Поток `/api/v1/verify`
 
-## Поток `GET /api/v1/verify`
-
-1. Клиент открывает ссылку `/api/v1/verify?payload=<jwt>`.
-2. Сервис извлекает `vuz_id` из payload без доверия к данным.
-3. По `vuz_id` находит `universities.public_key`.
-4. Проверяет `EdDSA` подпись JWT через `Ed25519`.
-5. Из валидного payload читает `sub`, `diploma_hash`, `vuz_id`, `diploma_number`, `student_name`, `specialty`, `degree`, `faculty`, `year`, `salt`, `iat`.
-6. Собирает строку:
+1. Клиент открывает `/api/v1/verify?payload=<jwt>`.
+2. Сервис без доверия читает `vuz_id`.
+3. По `vuz_id` грузит `universities.public_key`.
+4. Проверяет подпись JWT через `Ed25519`.
+5. Из верхнего payload читает:
+   - `sub`
+   - `diploma_hash`
+   - `vuz_id`
+   - `enc`
+   - `iat`
+6. Расшифровывает `enc` через `A256GCM`.
+7. Получает JSON:
+   - `full_name`
+   - `diploma_number`
+   - `specialty`
+   - `degree`
+   - `faculty`
+   - `year`
+   - `salt`
+8. Считает:
 
 ```text
-student_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
+SHA-256(diploma_number|full_name|specialty|degree|faculty|year|vuz_id|salt)
 ```
 
-7. Считает `SHA-256`.
-8. Сверяет результат с обязательными `sub` и `diploma_hash`.
-9. Ищет хеш в `diploma_hashes`.
-10. Возвращает `active`, `revoked` или `not_found`.
+9. Сверяет результат с `sub` и `diploma_hash`.
+10. Ищет хеш в `diploma_hashes`.
+11. Возвращает `active`, `revoked` или `not_found`.
 
-## Поток `GET /api/v1/verify/search`
+## Поток `/api/v1/verify/search`
 
 1. Клиент передает `diploma_number` и `vuz_code`.
 2. Сервис ищет запись по `universities.vuz_code + diploma_hashes.diploma_number`.
-3. Возвращает публичный статус и дополнительные поля `year` и `specialty`.
-4. Пока схема БД для этих полей не утверждена, сервис отдает их как `null`-заглушки.
+3. Для публичных атрибутов подтягивает `year`, `specialty`, `degree`, `faculty`
+   из `batch_record_attributes` через `batch_results`.
+4. Возвращает статус и публичные поля.
 
-## Временное состояние `year` и `specialty`
+## Используемые таблицы
 
-Поля сохранены:
+- `universities`
+- `diploma_hashes`
+- `batch_results`
+- `batch_record_attributes`
 
-- в доменных моделях
-- в JSON-ответах
-- в OpenAPI
+## Криптографический контракт
 
-Но пока не хранятся в PostgreSQL и не участвуют в SQL-запросах публичного сервиса.
-
-Это позволяет:
-
-- сохранить стабильный API-контракт
-- не добавлять в БД временную схему
-- подключить реальные данные позже без смены ответа
-
-`degree` и `faculty` приходят в QR JWT, валидируются на этапе разбора claims и участвуют в формуле хеша, но пока не отдаются наружу публичным API.
-
-## Почему нужен `vuz_code`
-
-В исходной схеме `universities` не было публичного идентификатора для поиска. Поэтому миграция добавляет `vuz_code`.
-
-Под `vuz_code` здесь понимается код формата `001X7276`, то есть код по сводному реестру, а не алиас вроде `bmstu`.
+- подпись JWT: `Ed25519` (`alg = EdDSA`)
+- шифрование `enc`: `A256GCM`
+- формат `enc`: `base64(nonce|ciphertext|tag)`
+- хеш диплома: `SHA-256`
 
 ## Границы ответственности
-
-### Main API / Gateway
-
-- принимает загрузки дипломов
-- создает batch-задачи
-- пишет в Kafka
-- сохраняет результаты обработки
 
 ### Crypto Engine
 
 - генерирует `salt`
-- считает `SHA-256` по согласованному контракту
-- формирует QR JWT
-- подписывает QR JWT приватным ключом `Ed25519` ВУЗа
+- формирует внутренний JSON диплома
+- шифрует его в `enc` через `A256GCM`
+- подписывает JWT приватным ключом `Ed25519`
+- отдает `diploma_hash`, `vuz_id`, `qr_payload`
 
 ### Public Verification API
 
-- извлекает `vuz_id` из JWT
-- находит `Ed25519` public key ВУЗа
-- проверяет `EdDSA` подпись JWT
+- проверяет подпись JWT
+- расшифровывает `enc`
 - пересчитывает хеш
-- ищет диплом в БД
+- сверяет хеш с реестром
 - возвращает публичный результат
-
-## Что сервис сознательно не делает
-
-- не использует `diploma_hashes.signature` в публичной верификации
-- не определяет валидность диплома только по JWT без lookup в БД
-- не хранит пока `year` и `specialty` в PostgreSQL
-
-## Структура кода
-
-- [`main.go`](/d:/diasoft/pubver/cmd/pubver/main.go) - запуск приложения
-- [`router.go`](/d:/diasoft/pubver/internal/httpapi/router.go) - HTTP endpoints
-- [`verification_service.go`](/d:/diasoft/pubver/internal/service/verification_service.go) - бизнес-логика
-- [`verification_repository.go`](/d:/diasoft/pubver/internal/repository/postgres/verification_repository.go) - SQL к PostgreSQL
-- [`hash.go`](/d:/diasoft/pubver/pkg/verifyhash/hash.go) - хеширование
-- [`qr_jwt.go`](/d:/diasoft/pubver/pkg/verifyhash/qr_jwt.go) - разбор QR JWT
-- [`ed25519.go`](/d:/diasoft/pubver/pkg/verifyhash/ed25519.go) - проверка `Ed25519`

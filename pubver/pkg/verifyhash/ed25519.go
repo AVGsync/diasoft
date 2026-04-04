@@ -48,17 +48,38 @@ func parseEd25519PublicKey(value string) (ed25519.PublicKey, error) {
 		return parseEd25519PublicKeyBytes(block.Bytes)
 	}
 
+	if looksLikeHex(trimmed) {
+		if decoded, err := hex.DecodeString(trimmed); err == nil {
+			return parseEd25519PublicKeyBytes(decoded)
+		}
+	}
+
 	if decoded, err := base64.StdEncoding.DecodeString(trimmed); err == nil {
 		return parseEd25519PublicKeyBytes(decoded)
 	}
 	if decoded, err := base64.RawStdEncoding.DecodeString(trimmed); err == nil {
 		return parseEd25519PublicKeyBytes(decoded)
 	}
-	if decoded, err := hex.DecodeString(trimmed); err == nil {
-		return parseEd25519PublicKeyBytes(decoded)
-	}
 
 	return nil, fmt.Errorf("unsupported ed25519 public key format")
+}
+
+func looksLikeHex(value string) bool {
+	if len(value) == 0 || len(value)%2 != 0 {
+		return false
+	}
+
+	for _, r := range value {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		case r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 func parseEd25519PublicKeyBytes(raw []byte) (ed25519.PublicKey, error) {

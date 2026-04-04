@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,12 +18,20 @@ type verificationService interface {
 	Search(ctx context.Context, vuzCode, diplomaNumber string) (domain.SearchResponse, error)
 }
 
+type RateLimitConfig struct {
+	Enabled         bool
+	RequestsPerSec  float64
+	Burst           int
+	VisitorTTL      time.Duration
+	CleanupInterval time.Duration
+}
+
 type Router struct {
 	logger  *slog.Logger
 	service verificationService
 }
 
-func NewRouter(logger *slog.Logger, requestTimeout time.Duration, verificationService verificationService) http.Handler {
+func NewRouter(logger *slog.Logger, requestTimeout time.Duration, rateLimitConfig RateLimitConfig, verificationService verificationService) http.Handler {
 	handler := &Router{
 		logger:  logger,
 		service: verificationService,
@@ -33,12 +42,17 @@ func NewRouter(logger *slog.Logger, requestTimeout time.Duration, verificationSe
 	mux.HandleFunc("GET /api/v1/verify", handler.verify)
 	mux.HandleFunc("GET /api/v1/verify/search", handler.search)
 
+	httpHandler := http.Handler(mux)
+	if rateLimitConfig.Enabled {
+		httpHandler = withRateLimit(logger, rateLimitConfig, httpHandler)
+	}
+
 	return withRequestTimeout(
 		requestTimeout,
 		withRecover(
 			logger,
 			withRequestID(
-				withLogging(logger, mux),
+				withLogging(logger, httpHandler),
 			),
 		),
 	)
@@ -86,11 +100,18 @@ func (h *Router) writeError(w http.ResponseWriter, err error) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
+	var buffer bytes.Buffer
+	if err := json.NewEncoder(&buffer).Encode(payload); err != nil {
+		slog.Error("encode json response", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("{\"error\":\"internal server error\"}\n"))
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		slog.Error("encode json response", "error", err)
-	}
+	_, _ = w.Write(buffer.Bytes())
 }
 
 func withRequestTimeout(timeout time.Duration, next http.Handler) http.Handler {

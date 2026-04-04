@@ -41,11 +41,22 @@ func main() {
 	}
 	defer cleanup()
 
-	verificationService := service.NewVerificationService(repo, logger)
+	verificationService := service.NewVerificationService(repo, logger, cfg.JWTEncKey)
 
 	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, cfg.RequestTimeout, verificationService),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.NewRouter(
+			logger,
+			cfg.RequestTimeout,
+			httpapi.RateLimitConfig{
+				Enabled:         cfg.RateLimit.Enabled,
+				RequestsPerSec:  cfg.RateLimit.RequestsPerSec,
+				Burst:           cfg.RateLimit.Burst,
+				VisitorTTL:      cfg.RateLimit.VisitorTTL,
+				CleanupInterval: cfg.RateLimit.CleanupInterval,
+			},
+			verificationService,
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -85,6 +85,7 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 	var status string
 	var revokedAt sql.NullTime
 	var universityCode sql.NullString
+	var universityName sql.NullString
 	var specialty sql.NullString
 	var graduateYear sql.NullInt64
 	var degree sql.NullString
@@ -96,7 +97,7 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 		&status,
 		&revokedAt,
 		&universityCode,
-		&record.University.Name,
+		&universityName,
 		&graduateYear,
 		&specialty,
 		&degree,
@@ -104,7 +105,7 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+			return nil, domain.ErrDiplomaRecordNotFound
 		}
 
 		return nil, err
@@ -112,6 +113,7 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 
 	record.Status = domain.DiplomaStatus(status)
 	record.University.Code = universityCode.String
+	record.University.Name = universityName.String
 
 	if revokedAt.Valid {
 		record.RevokedAt = &revokedAt.Time

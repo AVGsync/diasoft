@@ -5,9 +5,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
+	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type statusRecorder struct {
@@ -22,6 +28,37 @@ func (r *statusRecorder) WriteHeader(statusCode int) {
 
 func (r *statusRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
+}
+
+type visitor struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+type ipRateLimiter struct {
+	mu              sync.Mutex
+	logger          *slog.Logger
+	limit           rate.Limit
+	burst           int
+	visitorTTL      time.Duration
+	cleanupInterval time.Duration
+	lastCleanup     time.Time
+	visitors        map[string]*visitor
+}
+
+func newIPRateLimiter(logger *slog.Logger, cfg RateLimitConfig) *ipRateLimiter {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return &ipRateLimiter{
+		logger:          logger,
+		limit:           rate.Limit(cfg.RequestsPerSec),
+		burst:           cfg.Burst,
+		visitorTTL:      cfg.VisitorTTL,
+		cleanupInterval: cfg.CleanupInterval,
+		visitors:        make(map[string]*visitor),
+	}
 }
 
 func withLogging(logger *slog.Logger, next http.Handler) http.Handler {
@@ -61,6 +98,40 @@ func withRecover(logger *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
+func withRateLimit(logger *slog.Logger, cfg RateLimitConfig, next http.Handler) http.Handler {
+	limiter := newIPRateLimiter(logger, cfg)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		clientIP := extractClientIP(r)
+		now := time.Now()
+		reservation := limiter.reserve(clientIP, now)
+		if !reservation.OK() {
+			logger.Warn("rate limit rejected", "client_ip", clientIP, "path", r.URL.Path)
+			writeRateLimitExceeded(w, 1)
+			return
+		}
+
+		delay := reservation.DelayFrom(now)
+		if delay > 0 {
+			reservation.CancelAt(now)
+			retryAfter := int(math.Ceil(delay.Seconds()))
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+			logger.Warn("rate limit exceeded", "client_ip", clientIP, "path", r.URL.Path, "retry_after_sec", retryAfter)
+			writeRateLimitExceeded(w, retryAfter)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func withRequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
@@ -71,6 +142,69 @@ func withRequestID(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", requestID)
 		next.ServeHTTP(w, r.WithContext(withRequestIDContext(r.Context(), requestID)))
 	})
+}
+
+func (l *ipRateLimiter) reserve(clientIP string, now time.Time) *rate.Reservation {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.cleanupVisitors(now)
+
+	entry, ok := l.visitors[clientIP]
+	if !ok {
+		entry = &visitor{
+			limiter: rate.NewLimiter(l.limit, l.burst),
+		}
+		l.visitors[clientIP] = entry
+	}
+	entry.lastSeen = now
+
+	return entry.limiter.ReserveN(now, 1)
+}
+
+func (l *ipRateLimiter) cleanupVisitors(now time.Time) {
+	if l.cleanupInterval <= 0 || l.visitorTTL <= 0 {
+		return
+	}
+	if !l.lastCleanup.IsZero() && now.Sub(l.lastCleanup) < l.cleanupInterval {
+		return
+	}
+
+	for clientIP, entry := range l.visitors {
+		if now.Sub(entry.lastSeen) > l.visitorTTL {
+			delete(l.visitors, clientIP)
+		}
+	}
+
+	l.lastCleanup = now
+}
+
+func extractClientIP(r *http.Request) string {
+	if forwardedFor := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwardedFor != "" {
+		firstHop := strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
+		if firstHop != "" {
+			return firstHop
+		}
+	}
+
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+
+	host := strings.TrimSpace(r.RemoteAddr)
+	if addr, err := netip.ParseAddrPort(host); err == nil {
+		return addr.Addr().String()
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.String()
+	}
+
+	return host
+}
+
+func writeRateLimitExceeded(w http.ResponseWriter, retryAfterSeconds int) {
+	w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSeconds))
+	writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 }
 
 func newRequestID() string {

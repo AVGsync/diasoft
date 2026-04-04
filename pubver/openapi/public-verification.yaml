@@ -13,14 +13,14 @@ paths:
           description: Service is healthy
   /api/v1/verify:
     get:
-      summary: Verify diploma by EdDSA-signed QR JWT
+      summary: Verify diploma by EdDSA-signed QR JWT with encrypted enc payload
       parameters:
         - in: query
           name: payload
           required: true
           schema:
             type: string
-          description: JWT from QR code with flat claims sub, diploma_hash, vuz_id, diploma_number, student_name, specialty, degree, faculty, year, salt, iat and Ed25519 signature
+          description: JWT from QR code with claims sub, diploma_hash, vuz_id, enc, iat and Ed25519 signature. enc is A256GCM ciphertext encoded as base64 nonce|ciphertext|tag.
       responses:
         "200":
           description: Verification result
@@ -30,6 +30,8 @@ paths:
                 $ref: "#/components/schemas/VerifyResponse"
         "400":
           description: Invalid request
+        "429":
+          description: Rate limit exceeded
   /api/v1/verify/search:
     get:
       summary: Search diploma by vuz_code and diploma number
@@ -55,6 +57,8 @@ paths:
                 $ref: "#/components/schemas/SearchResponse"
         "400":
           description: Invalid request
+        "429":
+          description: Rate limit exceeded
 components:
   schemas:
     QRJWTPayload:
@@ -66,9 +70,18 @@ components:
           type: string
         vuz_id:
           type: string
-        diploma_number:
+        enc:
           type: string
-        student_name:
+          description: Base64-encoded A256GCM payload in nonce|ciphertext|tag format.
+        iat:
+          type: integer
+      required: [sub, diploma_hash, vuz_id, enc, iat]
+    EncryptedDiplomaPayload:
+      type: object
+      properties:
+        full_name:
+          type: string
+        diploma_number:
           type: string
         specialty:
           type: string
@@ -80,9 +93,7 @@ components:
           type: integer
         salt:
           type: string
-        iat:
-          type: integer
-      required: [sub, diploma_hash, vuz_id, diploma_number, student_name, specialty, degree, faculty, year, salt, iat]
+      required: [full_name, diploma_number, specialty, degree, faculty, year, salt]
     VerifyResponse:
       type: object
       properties:
@@ -105,19 +116,19 @@ components:
         year:
           type: integer
           nullable: true
-          description: Diploma year from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+          description: Diploma year from registry data. The field is omitted when no linked attributes are available.
         specialty:
           type: string
           nullable: true
-          description: Diploma specialty from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+          description: Diploma specialty from registry data. The field is omitted when no linked attributes are available.
         degree:
           type: string
           nullable: true
-          description: Diploma degree. For /verify it is taken from the verified JWT payload, for /search from batch_record_attributes when available.
+          description: Diploma degree from registry data. The field is omitted when no linked attributes are available.
         faculty:
           type: string
           nullable: true
-          description: Diploma faculty. For /verify it is taken from the verified JWT payload, for /search from batch_record_attributes when available.
+          description: Diploma faculty from registry data. The field is omitted when no linked attributes are available.
         revoked_at:
           type: string
           format: date-time
@@ -139,17 +150,17 @@ components:
         year:
           type: integer
           nullable: true
-          description: Diploma year from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+          description: Diploma year from batch_record_attributes. The field is omitted when no linked batch attributes exist.
         specialty:
           type: string
           nullable: true
-          description: Diploma specialty from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+          description: Diploma specialty from batch_record_attributes. The field is omitted when no linked batch attributes exist.
         degree:
           type: string
           nullable: true
-          description: Diploma degree from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+          description: Diploma degree from batch_record_attributes. The field is omitted when no linked batch attributes exist.
         faculty:
           type: string
           nullable: true
-          description: Diploma faculty from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+          description: Diploma faculty from batch_record_attributes. The field is omitted when no linked batch attributes exist.
       required: [valid, status]

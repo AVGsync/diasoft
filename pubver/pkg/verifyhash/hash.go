@@ -19,20 +19,32 @@ type DiplomaHashInput struct {
 	Salt          string
 }
 
-func (i DiplomaHashInput) Validate() error {
+func validateDiplomaCoreFields(fullName, diplomaNumber, specialty string, year int) error {
 	switch {
-	case strings.TrimSpace(i.FullName) == "":
-		return fmt.Errorf("student_name must not be empty")
-	case strings.TrimSpace(i.DiplomaNumber) == "":
+	case strings.TrimSpace(fullName) == "":
+		return fmt.Errorf("full_name must not be empty")
+	case strings.TrimSpace(diplomaNumber) == "":
 		return fmt.Errorf("diploma_number must not be empty")
-	case strings.TrimSpace(i.Specialty) == "":
+	case strings.TrimSpace(specialty) == "":
 		return fmt.Errorf("specialty must not be empty")
-	case strings.TrimSpace(i.Degree) == "":
-		return fmt.Errorf("degree must not be empty")
-	case strings.TrimSpace(i.Faculty) == "":
-		return fmt.Errorf("faculty must not be empty")
-	case i.Year <= 0:
+	case year <= 0:
 		return fmt.Errorf("year must be a positive integer")
+	default:
+		return nil
+	}
+}
+
+func (i DiplomaHashInput) Validate() error {
+	if err := validateDiplomaCoreFields(
+		i.FullName,
+		i.DiplomaNumber,
+		i.Specialty,
+		i.Year,
+	); err != nil {
+		return err
+	}
+
+	switch {
 	case strings.TrimSpace(i.VUZID) == "":
 		return fmt.Errorf("vuz_id must not be empty")
 	case strings.TrimSpace(i.Salt) == "":
@@ -58,8 +70,8 @@ func BuildRawDiplomaString(input DiplomaHashInput) (string, error) {
 	}
 
 	parts := []string{
-		strings.TrimSpace(input.FullName),
 		strings.TrimSpace(input.DiplomaNumber),
+		strings.TrimSpace(input.FullName),
 		strings.TrimSpace(input.Specialty),
 		strings.TrimSpace(input.Degree),
 		strings.TrimSpace(input.Faculty),
