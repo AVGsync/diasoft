@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
-use chrono::Utc;
 use sqlx::PgPool;
 use tracing::{debug, info, warn, error};
 
 use crate::config::AppConfig;
 use crate::cryptography::{
-    create_qr_jwt, generate_salt, hash_diploma,
+    create_qr_jwt, derive_salt, hash_diploma,
     sign_hash, StudentFieldsForHash, build_qr_claims,
 };
 use crate::db::models::NewDiplomaHash;
-use crate::db::repository::{diploma_hash_exists, get_university_key, insert_diploma_hash};
+use crate::db::repository::{get_diploma_by_vuz_and_number, get_university_key, insert_diploma_hash};
 use crate::error::{AppError, AppResult};
 use crate::kafka::messages::{DiplomaTask, ProcessingResult, ProcessingStatus};
 use crate::kafka::producer::KafkaProducer;
@@ -105,7 +104,7 @@ impl DiplomaProcessor {
             "Retrieved university signing key"
         );
 
-        let salt = generate_salt()?;
+        let salt = derive_salt(task.vuz_id, &task.student.diploma_number)?;
         let student_for_hash = StudentFieldsForHash {
             full_name: &task.student.full_name,
             diploma_number: &task.student.diploma_number,
@@ -117,21 +116,24 @@ impl DiplomaProcessor {
         let diploma_hash = hash_diploma(&student_for_hash, task.vuz_id, &salt)?;
         debug!(diploma_hash = %diploma_hash, "Generated diploma hash");
 
-        if diploma_hash_exists(&self.pool, &diploma_hash).await? {
-            warn!(
+        let existing_diploma = get_diploma_by_vuz_and_number(
+            &self.pool,
+            task.vuz_id,
+            &task.student.diploma_number,
+        ).await?;
+
+        if let Some(existing_diploma) = &existing_diploma {
+            if existing_diploma.hash != diploma_hash {
+                return Err(AppError::Hashing(
+                    "diploma number already exists with another hash".to_string(),
+                ));
+            }
+
+            debug!(
                 diploma_hash = %diploma_hash,
-                "Diploma hash already exists, returning existing result"
+                diploma_number = %task.student.diploma_number,
+                "Diploma already exists with the same hash, reusing deterministic identity"
             );
-            return Ok(ProcessingResult {
-                batch_id: task.batch_id,
-                vuz_id: task.vuz_id,
-                record_index: task.record_index,
-                diploma_hash,
-                qr_payload: None,
-                status: ProcessingStatus::Ok,
-                error: None,
-                processed_at: Utc::now(),
-            });
         }
 
         let private_key_pem = self.decrypt_private_key(&key_data.encrypted_private_key)?;
@@ -166,8 +168,10 @@ impl DiplomaProcessor {
             diploma_number: &task.student.diploma_number,
             signature: Some(&signature),
         };
-        insert_diploma_hash(&self.pool, &new_diploma).await?;
-        debug!(diploma_hash = %diploma_hash, "Persisted diploma hash to database");
+        if existing_diploma.is_none() {
+            insert_diploma_hash(&self.pool, &new_diploma).await?;
+            debug!(diploma_hash = %diploma_hash, "Persisted diploma hash to database");
+        }
 
         Ok(ProcessingResult::success(
             task.batch_id,

@@ -76,16 +76,17 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
 
   db-migrate:
-    image: postgres:16-alpine
+    image: golang:1.24-alpine
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      <<: *build-proxy
       DATABASE_URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
     volumes:
       - .:/workspace:ro
-      - ./deploy/migrate.sh:/migrate.sh:ro
-    command: ["sh", "/migrate.sh"]
+      - ./deploy/migrate-go.sh:/migrate-go.sh:ro
+    entrypoint: ["sh", "/migrate-go.sh"]
     restart: "no"
 
   gateway-service:

@@ -1,7 +1,5 @@
 use sha2::{Digest, Sha256};
 use hex;
-use rand::RngCore;
-use rand::rngs::OsRng;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
@@ -15,11 +13,13 @@ pub struct StudentFieldsForHash<'a> {
     pub year: u16,
 }
 
-pub fn generate_salt() -> AppResult<String> {
-    let mut bytes = [0u8; 32];
-    OsRng.try_fill_bytes(&mut bytes)
-        .map_err(|e| AppError::Hashing(format!("failed to generate salt: {}", e)))?;
-    Ok(hex::encode(bytes))
+pub fn derive_salt(vuz_id: Uuid, diploma_number: &str) -> AppResult<String> {
+    let trimmed = diploma_number.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Hashing("diploma number must not be empty".to_string()));
+    }
+
+    Ok(hash_sha256(format!("diasoft|{}|{}", vuz_id, trimmed)))
 }
 
 pub fn hash_diploma(student: &StudentFieldsForHash, vuz_id: Uuid, salt: &str) -> AppResult<String> {
@@ -93,17 +93,24 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_salt() {
-        let salt = generate_salt().expect("salt generation failed");
+    fn test_derive_salt() {
+        let salt = derive_salt(
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+            "DIP-2024-0001",
+        ).expect("salt derivation failed");
         assert_eq!(salt.len(), 64);
         assert!(salt.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
-    fn test_generate_salt_unique() {
-        let salt1 = generate_salt().expect("salt generation failed");
-        let salt2 = generate_salt().expect("salt generation failed");
-        assert_ne!(salt1, salt2);
+    fn test_derive_salt_is_deterministic() {
+        let vuz_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let salt1 = derive_salt(vuz_id, "DIP-2024-0001").expect("salt derivation failed");
+        let salt2 = derive_salt(vuz_id, "DIP-2024-0001").expect("salt derivation failed");
+        let salt3 = derive_salt(vuz_id, "DIP-2024-0002").expect("salt derivation failed");
+
+        assert_eq!(salt1, salt2);
+        assert_ne!(salt1, salt3);
     }
 
     #[test]

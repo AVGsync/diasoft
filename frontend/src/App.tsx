@@ -13,6 +13,7 @@ import {
   InputNumber,
   List,
   Modal,
+  Progress,
   Row,
   Select,
   Space,
@@ -42,7 +43,15 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
-import { apiRequest, clearSession, downloadBlob, loadSession, saveSession } from "./lib/api";
+import {
+  apiRequest,
+  clearSession,
+  downloadBlob,
+  downloadFileWithProgress,
+  loadSession,
+  saveSession,
+  type DownloadProgress,
+} from "./lib/api";
 import type {
   AdminStats,
   ApiKeyCreateResponse,
@@ -86,6 +95,18 @@ const emptyRecord = (): DiplomaRecordInput => ({
   faculty: "",
   year: new Date().getFullYear(),
 });
+
+type UploadMode = "json" | "csv";
+
+interface BatchDownloadState {
+  batchId: string;
+  stage: DownloadProgress["stage"] | "failed";
+  loadedBytes: number;
+  totalBytes?: number;
+  error?: string;
+}
+
+const BATCH_POLL_INTERVAL_MS = 2500;
 
 const antTheme = {
   token: {
@@ -1469,9 +1490,33 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
   const [students, setStudents] = useState<StudentSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [uploadingMode, setUploadingMode] = useState<UploadMode | null>(null);
+  const [trackedBatchId, setTrackedBatchId] = useState<string | null>(null);
+  const [downloadState, setDownloadState] = useState<BatchDownloadState | null>(null);
 
-  const loadCabinet = async () => {
-    setLoading(true);
+  const activeBatch =
+    batches.find((batch) => batch.id === trackedBatchId) ??
+    batches.find((batch) => !isBatchTerminal(batch.status)) ??
+    null;
+
+  const upsertBatch = (nextBatch: Batch) => {
+    setBatches((current) => {
+      const index = current.findIndex((batch) => batch.id === nextBatch.id);
+      if (index === -1) {
+        return [nextBatch, ...current].slice(0, 10);
+      }
+
+      const next = [...current];
+      next[index] = nextBatch;
+      return next;
+    });
+  };
+
+  const loadCabinet = async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
+
     try {
       const [nextProfile, nextSigningKey, nextBatches, nextKeys] = await Promise.all([
         apiRequest<UniversityRecord>("/vuz/profile", { token: session.access_token }),
@@ -1484,16 +1529,82 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
       setSigningKeyStatus(nextSigningKey);
       setBatches(nextBatches);
       setApiKeys(nextKeys);
+
+      const nextProcessingBatch = nextBatches.find((batch) => !isBatchTerminal(batch.status));
+      setTrackedBatchId((current) => {
+        if (current) {
+          const currentBatch = nextBatches.find((batch) => batch.id === current);
+          if (currentBatch && !isBatchTerminal(currentBatch.status)) {
+            return current;
+          }
+        }
+
+        return nextProcessingBatch?.id ?? null;
+      });
     } catch (error) {
       message.error((error as Error).message);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     void loadCabinet();
   }, []);
+
+  useEffect(() => {
+    if (!activeBatch || isBatchTerminal(activeBatch.status)) {
+      return;
+    }
+
+    let cancelled = false;
+    let timerId: number | undefined;
+
+    const pollBatch = async () => {
+      try {
+        const nextBatch = await apiRequest<Batch>(`/diplomas/batches/${activeBatch.id}`, {
+          token: session.access_token,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        upsertBatch(nextBatch);
+
+        if (isBatchTerminal(nextBatch.status)) {
+          setTrackedBatchId((current) => (current === nextBatch.id ? null : current));
+          void loadCabinet(true);
+
+          if (nextBatch.status === "completed") {
+            message.success(`Батч ${nextBatch.id.slice(0, 8)} обработан.`);
+          } else {
+            message.warning(`Батч ${nextBatch.id.slice(0, 8)} завершился с ошибками.`);
+          }
+          return;
+        }
+      } catch {
+        if (cancelled) {
+          return;
+        }
+      }
+
+      timerId = window.setTimeout(() => {
+        void pollBatch();
+      }, BATCH_POLL_INTERVAL_MS);
+    };
+
+    void pollBatch();
+
+    return () => {
+      cancelled = true;
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [activeBatch?.id, activeBatch?.status, session.access_token]);
 
   const uploadSigningKey = async (values: { private_key_pem: string }) => {
     try {
@@ -1527,6 +1638,7 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
   };
 
   const uploadDiplomas = async (values: { diplomas: DiplomaRecordInput[] }) => {
+    setUploadingMode("json");
     try {
       const payload = {
         diplomas: values.diplomas
@@ -1543,10 +1655,13 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
         body: payload,
       });
 
+      setTrackedBatchId(response.batch_id);
       message.success(`Батч ${response.batch_id} отправлен в обработку.`);
       await loadCabinet();
     } catch (error) {
       message.error((error as Error).message);
+    } finally {
+      setUploadingMode(null);
     }
   };
 
@@ -1559,6 +1674,7 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
     const formData = new FormData();
     formData.append("file", csvFile);
 
+    setUploadingMode("csv");
     try {
       const response = await apiRequest<BatchUploadResponse>("/diplomas/upload", {
         method: "POST",
@@ -1566,11 +1682,14 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
         body: formData,
       });
 
+      setTrackedBatchId(response.batch_id);
       message.success(`CSV загружен. Батч ${response.batch_id} создан.`);
       setCsvFile(null);
       await loadCabinet();
     } catch (error) {
       message.error((error as Error).message);
+    } finally {
+      setUploadingMode(null);
     }
   };
 
@@ -1642,15 +1761,42 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
   };
 
   const downloadBatch = async (batch: Batch) => {
-    try {
-      const blob = await apiRequest<Blob>(`/diplomas/batches/${batch.id}/download`, {
-        token: session.access_token,
-        responseType: "blob",
-      });
+    setDownloadState({
+      batchId: batch.id,
+      stage: "preparing",
+      loadedBytes: 0,
+    });
 
-      downloadBlob(blob, `batch_${batch.id}.xlsx`);
+    try {
+      await downloadFileWithProgress(
+        `/diplomas/batches/${batch.id}/download`,
+        `batch_${batch.id}.xlsx`,
+        {
+          token: session.access_token,
+        },
+        (progress) => {
+          setDownloadState({
+            batchId: batch.id,
+            stage: progress.stage,
+            loadedBytes: progress.loadedBytes,
+            totalBytes: progress.totalBytes,
+          });
+        },
+      );
+
+      message.success(`Excel для батча ${batch.id.slice(0, 8)} начал скачиваться.`);
+      window.setTimeout(() => {
+        setDownloadState((current) => (current?.batchId === batch.id ? null : current));
+      }, 1200);
     } catch (error) {
-      message.error((error as Error).message);
+      const errorMessage = (error as Error).message;
+      setDownloadState({
+        batchId: batch.id,
+        stage: "failed",
+        loadedBytes: 0,
+        error: errorMessage,
+      });
+      message.error(errorMessage);
     }
   };
 
@@ -1667,7 +1813,19 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
     },
     {
       title: "Прогресс",
-      render: (_, record) => `${record.processed_records}/${record.total_records}`,
+      render: (_, record) => (
+        <Space direction="vertical" size={4} className="flex">
+          <Progress
+            percent={getBatchProgressPercent(record)}
+            size="small"
+            status={getBatchProgressStatus(record.status)}
+            showInfo={false}
+          />
+          <Text type="secondary">
+            {record.processed_records}/{record.total_records} · ошибок {record.failed_records}
+          </Text>
+        </Space>
+      ),
     },
     {
       title: "Ошибки",
@@ -1676,7 +1834,14 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
     {
       title: "Действие",
       render: (_, record) => (
-        <Button icon={<FileExcelOutlined />} onClick={() => void downloadBatch(record)}>
+        <Button
+          icon={<FileExcelOutlined />}
+          onClick={() => void downloadBatch(record)}
+          loading={
+            downloadState?.batchId === record.id &&
+            (downloadState.stage === "preparing" || downloadState.stage === "downloading")
+          }
+        >
           Excel
         </Button>
       ),
@@ -1760,6 +1925,59 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
           }
         />
       )}
+
+      {activeBatch && (
+        <Alert
+          type={activeBatch.status === "failed" ? "warning" : "info"}
+          showIcon
+          message={
+            isBatchTerminal(activeBatch.status)
+              ? `Батч ${activeBatch.id.slice(0, 8)} завершён`
+              : `Батч ${activeBatch.id.slice(0, 8)} обрабатывается`
+          }
+          description={
+            <Space direction="vertical" size={8} className="flex">
+              <Progress
+                percent={getBatchProgressPercent(activeBatch)}
+                status={getBatchProgressStatus(activeBatch.status)}
+                size="small"
+              />
+              <Text type="secondary">
+                Обработано {activeBatch.processed_records} из {activeBatch.total_records}, ошибок {activeBatch.failed_records}.
+                {isBatchTerminal(activeBatch.status) ? " Статус обновлён автоматически." : " Данные обновляются каждые 2.5 секунды."}
+              </Text>
+            </Space>
+          }
+        />
+      )}
+
+      <Modal
+        open={Boolean(downloadState)}
+        title="Выгрузка Excel"
+        footer={
+          downloadState?.stage === "failed"
+            ? [
+                <Button key="close" type="primary" onClick={() => setDownloadState(null)}>
+                  Закрыть
+                </Button>,
+              ]
+            : null
+        }
+        closable={downloadState?.stage === "failed"}
+        maskClosable={downloadState?.stage === "failed"}
+        onCancel={() => setDownloadState(null)}
+      >
+        {downloadState && (
+          <Space direction="vertical" size={12} className="flex">
+            <Text strong>{getDownloadStateTitle(downloadState)}</Text>
+            <Progress
+              percent={getDownloadProgressPercent(downloadState)}
+              status={getDownloadProgressStatus(downloadState)}
+            />
+            <Text type="secondary">{getDownloadStateDescription(downloadState)}</Text>
+          </Space>
+        )}
+      </Modal>
 
       <Tabs
         animated={false}
@@ -1894,7 +2112,12 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
                           ))}
                           <Space>
                             <Button onClick={() => add(emptyRecord())}>Добавить запись</Button>
-                            <Button type="primary" htmlType="submit" icon={<SendOutlined />}>
+                            <Button
+                              type="primary"
+                              htmlType="submit"
+                              icon={<SendOutlined />}
+                              loading={uploadingMode === "json"}
+                            >
                               Отправить в обработку
                             </Button>
                           </Space>
@@ -1914,6 +2137,7 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
                     />
                     <Upload.Dragger
                       maxCount={1}
+                      disabled={uploadingMode === "csv"}
                       beforeUpload={(file) => {
                         setCsvFile(file);
                         return false;
@@ -1924,7 +2148,12 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
                     >
                       <p className="ant-upload-text">Перетащите CSV или нажмите для выбора файла</p>
                     </Upload.Dragger>
-                    <Button type="primary" icon={<FileExcelOutlined />} onClick={() => void uploadCsv()}>
+                    <Button
+                      type="primary"
+                      icon={<FileExcelOutlined />}
+                      onClick={() => void uploadCsv()}
+                      loading={uploadingMode === "csv"}
+                    >
                       Отправить CSV
                     </Button>
                   </Space>
@@ -2239,6 +2468,102 @@ function VerificationPayloadResult({ result }: { result: VerificationByPayloadRe
       </Space>
     </Card>
   );
+}
+
+function isBatchTerminal(status: string) {
+  return status === "completed" || status === "failed";
+}
+
+function getBatchProgressPercent(batch: Batch) {
+  if (batch.total_records <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, Math.round((batch.processed_records / batch.total_records) * 100)));
+}
+
+function getBatchProgressStatus(status: string): "active" | "success" | "exception" {
+  if (status === "completed") {
+    return "success";
+  }
+
+  if (status === "failed") {
+    return "exception";
+  }
+
+  return "active";
+}
+
+function getDownloadProgressPercent(state: BatchDownloadState) {
+  if (state.stage === "completed" || state.stage === "failed") {
+    return 100;
+  }
+
+  if (state.totalBytes && state.totalBytes > 0) {
+    return Math.max(1, Math.min(99, Math.round((state.loadedBytes / state.totalBytes) * 100)));
+  }
+
+  return state.stage === "preparing" ? 20 : 70;
+}
+
+function getDownloadProgressStatus(state: BatchDownloadState): "active" | "success" | "exception" {
+  if (state.stage === "completed") {
+    return "success";
+  }
+
+  if (state.stage === "failed") {
+    return "exception";
+  }
+
+  return "active";
+}
+
+function getDownloadStateTitle(state: BatchDownloadState) {
+  if (state.stage === "preparing") {
+    return `Генерируем Excel для батча ${state.batchId.slice(0, 8)}`;
+  }
+
+  if (state.stage === "downloading") {
+    return `Скачиваем Excel для батча ${state.batchId.slice(0, 8)}`;
+  }
+
+  if (state.stage === "completed") {
+    return "Файл передан в браузер";
+  }
+
+  return "Не удалось выгрузить Excel";
+}
+
+function getDownloadStateDescription(state: BatchDownloadState) {
+  if (state.stage === "preparing") {
+    return "Сервер собирает Excel-файл. Как только начнётся передача ответа, появится прогресс скачивания.";
+  }
+
+  if (state.stage === "downloading") {
+    if (state.totalBytes && state.totalBytes > 0) {
+      return `Скачано ${formatBytes(state.loadedBytes)} из ${formatBytes(state.totalBytes)}.`;
+    }
+
+    return `Скачано ${formatBytes(state.loadedBytes)}. Сервер не передал размер файла, поэтому идёт потоковая загрузка.`;
+  }
+
+  if (state.stage === "completed") {
+    return "Excel сформирован и передан браузеру. Загрузка должна начаться автоматически.";
+  }
+
+  return state.error ?? "Сервер не смог сформировать файл.";
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatDate(value?: string | null) {

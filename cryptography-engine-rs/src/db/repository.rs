@@ -186,6 +186,26 @@ pub async fn get_diploma_by_hash(
     Ok(record)
 }
 
+pub async fn get_diploma_by_vuz_and_number(
+    pool: &PgPool,
+    vuz_id: Uuid,
+    diploma_number: &str,
+) -> AppResult<Option<DiplomaHashRecord>> {
+    let record = sqlx::query_as::<_, DiplomaHashRecord>(
+        r#"
+        SELECT hash, vuz_id, diploma_number, status, revoked_at, created_at
+        FROM diploma_hashes
+        WHERE vuz_id = $1 AND diploma_number = $2
+        "#
+    )
+    .bind(vuz_id)
+    .bind(diploma_number)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(record)
+}
+
 /// Checks if a diploma hash already exists in the database.
 ///
 /// # Arguments

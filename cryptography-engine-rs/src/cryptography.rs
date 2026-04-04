@@ -4,7 +4,7 @@ pub mod encryption;
 pub mod jwt;
 pub mod jwe;
 
-pub use hashing::{generate_salt, hash_diploma, StudentFieldsForHash};
+pub use hashing::{derive_salt, hash_diploma, StudentFieldsForHash};
 pub use signing::{sign_hash, verify_signature};
 pub use encryption::{encrypt_payload, decrypt_payload};
 pub use jwt::{

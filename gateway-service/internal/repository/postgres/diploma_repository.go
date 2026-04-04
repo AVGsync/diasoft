@@ -496,10 +496,17 @@ func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, f
 			dh.status,
 			dh.created_at
 		FROM diploma_hashes dh
-		JOIN batch_results result ON result.diploma_hash = dh.hash
+		JOIN LATERAL (
+			SELECT batch_id, record_index, qr_payload
+			FROM batch_results
+			WHERE diploma_hash = dh.hash
+			  AND status = 'ok'
+			ORDER BY created_at DESC
+			LIMIT 1
+		) result ON TRUE
 		LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
 		JOIN universities u ON u.id = dh.vuz_id
-		WHERE result.status = 'ok'`
+		WHERE 1 = 1`
 
 	args := make([]interface{}, 0, 1)
 	if strings.TrimSpace(diplomaNumber) != "" {
@@ -591,11 +598,17 @@ func (r *DiplomaRepository) FindStudentByHash(ctx context.Context, diplomaHash s
 			dh.status,
 			dh.created_at
 		 FROM diploma_hashes dh
-		 JOIN batch_results result ON result.diploma_hash = dh.hash
+		 JOIN LATERAL (
+		 	SELECT batch_id, record_index, qr_payload
+		 	FROM batch_results
+		 	WHERE diploma_hash = dh.hash
+		 	  AND status = 'ok'
+		 	ORDER BY created_at DESC
+		 	LIMIT 1
+		 ) result ON TRUE
 		 LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
 		 JOIN universities u ON u.id = dh.vuz_id
 		 WHERE dh.hash = $1
-		   AND result.status = 'ok'
 		 LIMIT 1`,
 		diplomaHash,
 	).Scan(
