@@ -41,10 +41,6 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=${NO_PROXY} \
     no_proxy=${NO_PROXY}
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 COPY --from=builder /src/target/release/crypto-engine /usr/local/bin/crypto-engine

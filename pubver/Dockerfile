@@ -32,8 +32,6 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=${NO_PROXY} \
     no_proxy=${NO_PROXY}
 
-RUN apk add --no-cache ca-certificates
-
 WORKDIR /app
 
 COPY --from=builder /out/pubver /app/pubver
