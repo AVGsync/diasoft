@@ -16,8 +16,10 @@ case "$DATABASE_URL" in
 esac
 
 echo "Installing golang-migrate..."
-apk add --no-cache git postgresql-client >/dev/null
-go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.17.1
+command -v migrate >/dev/null 2>&1 || {
+  echo "migrate binary is not available in the container" >&2
+  exit 1
+}
 
 echo "Waiting for PostgreSQL..."
 until pg_isready -d "$DATABASE_URL" >/dev/null 2>&1; do
@@ -45,6 +47,6 @@ SQL
 fi
 
 echo "Running golang-migrate..."
-/go/bin/migrate -path /workspace/gateway-service/migrations -database "$GO_MIGRATE_DATABASE_URL" up
+migrate -path /workspace/gateway-service/migrations -database "$GO_MIGRATE_DATABASE_URL" up
 
 echo "Database migrations finished successfully."
