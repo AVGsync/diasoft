@@ -14,25 +14,14 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN go mod download
-
+COPY vendor ./vendor
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/pubver ./cmd/pubver
+
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /out/pubver ./cmd/pubver
 
 FROM alpine:3.22
 
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG NO_PROXY
-
-ENV HTTP_PROXY=${HTTP_PROXY} \
-    HTTPS_PROXY=${HTTPS_PROXY} \
-    http_proxy=${HTTP_PROXY} \
-    https_proxy=${HTTPS_PROXY} \
-    NO_PROXY=${NO_PROXY} \
-    no_proxy=${NO_PROXY}
-
-RUN apk add --no-cache ca-certificates
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 WORKDIR /app
 
