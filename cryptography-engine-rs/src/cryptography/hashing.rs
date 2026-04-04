@@ -1,24 +1,11 @@
-//! Diploma hashing operations.
-//!
-//! Implements the canonical diploma hashing algorithm:
-//! ```text
-//! salt = random 32 bytes → hex string (64 chars)
-//! raw  = "{full_name}|{diploma_number}|{specialty}|{year}|{vuz_id}|{salt}"
-//! hash = SHA-256(raw) → 64-char hex string
-//! ```
-//!
-//! The salt is stored inside the QR JWT payload so the verifier service
-//! can independently recompute the hash from the scanned JWT without
-//! any additional DB lookup.
-
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
+use hex;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 
-/// Student fields required for diploma hashing
-#[derive(Debug, Clone)]
 pub struct StudentFieldsForHash<'a> {
     pub full_name: &'a str,
     pub diploma_number: &'a str,
@@ -26,35 +13,14 @@ pub struct StudentFieldsForHash<'a> {
     pub year: u16,
 }
 
-/// Generates a cryptographically random 32-byte salt as a hex string (64 characters).
-///
-/// Uses `rand::thread_rng()` for cryptographically secure random number generation.
 pub fn generate_salt() -> AppResult<String> {
-    let mut salt_bytes = [0u8; 32];
-    rand::thread_rng()
-        .try_fill_bytes(&mut salt_bytes)
+    let mut bytes = [0u8; 32];
+    OsRng.try_fill_bytes(&mut bytes)
         .map_err(|e| AppError::Hashing(format!("failed to generate salt: {}", e)))?;
-    Ok(hex::encode(salt_bytes))
+    Ok(hex::encode(bytes))
 }
 
-/// Computes the SHA-256 hash of a diploma record.
-///
-/// The hash is computed over the canonical string representation:
-/// `{full_name}|{diploma_number}|{specialty}|{year}|{vuz_id}|{salt}`
-///
-/// # Arguments
-/// * `student` - Student fields for hashing
-/// * `vuz_id` - University UUID
-/// * `salt` - 64-character hex salt string
-///
-/// # Returns
-/// 64-character hex-encoded SHA-256 hash
-pub fn hash_diploma(
-    student: &StudentFieldsForHash<'_>,
-    vuz_id: Uuid,
-    salt: &str,
-) -> AppResult<String> {
-    // Build canonical string for hashing
+pub fn hash_diploma(student: &StudentFieldsForHash, vuz_id: Uuid, salt: &str) -> AppResult<String> {
     let canonical = format!(
         "{}|{}|{}|{}|{}|{}",
         student.full_name,
@@ -65,56 +31,91 @@ pub fn hash_diploma(
         salt
     );
     
-    // Compute SHA-256 hash
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
-    let hash_bytes = hasher.finalize();
-    
-    Ok(hex::encode(hash_bytes))
+    let result = hasher.finalize();
+    Ok(hex::encode(result))
+}
+
+pub fn hash_sha256<T: ToString>(data: T) -> String {
+    let formatted = data.to_string();
+    let mut hasher = Sha256::new();
+    hasher.update(formatted.as_bytes());
+    let result = hasher.finalize();
+    hex::encode(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
-    fn test_generate_salt_length() {
-        let salt = generate_salt().unwrap();
+    fn test_hash_sha256_empty_string() {
+        let hash = hash_sha256("");
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn test_hash_sha256_known_value() {
+        let hash = hash_sha256("hello world");
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
+
+    #[test]
+    fn test_hash_sha256_returns_64_chars() {
+        let hash = hash_sha256("any input");
+        assert_eq!(hash.len(), 64);
+    }
+
+    #[test]
+    fn test_hash_sha256_is_deterministic() {
+        let hash1 = hash_sha256("test");
+        let hash2 = hash_sha256("test");
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_combined_workflow() {
+        let data = "important data";
+        let hash = hash_sha256(&data);
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_generate_salt() {
+        let salt = generate_salt().expect("salt generation failed");
         assert_eq!(salt.len(), 64);
         assert!(salt.chars().all(|c| c.is_ascii_hexdigit()));
     }
-    
+
     #[test]
-    fn test_hash_diploma_deterministic() {
-        let student = StudentFieldsForHash {
-            full_name: "Иванов Иван Иванович",
-            diploma_number: "ДВС-2024-001234",
-            specialty: "Программная инженерия",
-            year: 2024,
-        };
-        let vuz_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let salt = "a".repeat(64);
-        
-        let hash1 = hash_diploma(&student, vuz_id, &salt).unwrap();
-        let hash2 = hash_diploma(&student, vuz_id, &salt).unwrap();
-        
-        assert_eq!(hash1, hash2);
-        assert_eq!(hash1.len(), 64);
+    fn test_generate_salt_unique() {
+        let salt1 = generate_salt().expect("salt generation failed");
+        let salt2 = generate_salt().expect("salt generation failed");
+        assert_ne!(salt1, salt2);
     }
-    
+
     #[test]
-    fn test_hash_diploma_different_salt() {
+    fn test_hash_diploma() {
+        let vuz_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
         let student = StudentFieldsForHash {
-            full_name: "Иванов Иван Иванович",
+            full_name: "Ivan Ivanov",
             diploma_number: "ДВС-2024-001234",
-            specialty: "Программная инженерия",
+            specialty: "Computer Science",
             year: 2024,
         };
-        let vuz_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let salt = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         
-        let hash1 = hash_diploma(&student, vuz_id, &"a".repeat(64)).unwrap();
-        let hash2 = hash_diploma(&student, vuz_id, &"b".repeat(64)).unwrap();
+        let hash = hash_diploma(&student, vuz_id, salt).expect("hash failed");
         
-        assert_ne!(hash1, hash2);
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

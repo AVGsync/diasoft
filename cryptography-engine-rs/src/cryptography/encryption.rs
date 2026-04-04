@@ -1,171 +1,129 @@
-//! AES-GCM encryption for student payload data.
-//!
-//! Encrypts the full student struct so that raw personal data is never
-//! stored in plaintext. The resulting ciphertext is stored in
-//! `batch_results.encrypted_payload`.
-
 use aes_gcm::{
     aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use serde::Serialize;
 use rand::RngCore;
-use serde::{de::DeserializeOwned, Serialize};
 
 use crate::error::{AppError, AppResult};
+use crate::kafka::messages::StudentFields;
 
-/// Encrypts a serializable payload using AES-256-GCM.
-///
-/// # Arguments
-/// * `data` - Data to encrypt (must be JSON-serializable)
-/// * `key` - 32-byte encryption key
-///
-/// # Returns
-/// Base64-encoded ciphertext with 12-byte nonce prepended
-///
-/// # Format
-/// `[12-byte nonce][ciphertext]` encoded as base64
-pub fn encrypt_payload<T: Serialize>(data: &T, key: &[u8]) -> AppResult<String> {
-    // Validate key length
-    if key.len() != 32 {
-        return Err(AppError::Encryption(
-            "encryption key must be 32 bytes".to_string()
-        ));
-    }
-    
-    // Serialize data to JSON
-    let json = serde_json::to_vec(data)?;
-    
-    // Create cipher
+pub fn encrypt_payload<T: Serialize>(payload: &T, key: &[u8]) -> AppResult<String> {
     let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| AppError::Encryption(format!("failed to create cipher: {}", e)))?;
+        .map_err(|e| AppError::Encryption(format!("invalid key: {}", e)))?;
     
-    // Generate random nonce
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
     
-    // Encrypt
+    let plaintext = serde_json::to_vec(payload)
+        .map_err(|e| AppError::Encryption(format!("serialization failed: {}", e)))?;
+    
     let ciphertext = cipher
-        .encrypt(nonce, json.as_ref())
+        .encrypt(nonce, plaintext.as_ref())
         .map_err(|e| AppError::Encryption(format!("encryption failed: {}", e)))?;
     
-    // Prepend nonce to ciphertext and encode as base64
-    let mut result = Vec::with_capacity(12 + ciphertext.len());
-    result.extend_from_slice(&nonce_bytes);
-    result.extend_from_slice(&ciphertext);
+    let mut result = nonce_bytes.to_vec();
+    result.extend(ciphertext);
     
     Ok(BASE64.encode(&result))
 }
 
-/// Decrypts an AES-256-GCM encrypted payload.
-///
-/// # Arguments
-/// * `ciphertext` - Base64-encoded ciphertext with nonce prepended
-/// * `key` - 32-byte encryption key
-///
-/// # Returns
-/// Deserialized data of type T
-pub fn decrypt_payload<T: DeserializeOwned>(ciphertext: &str, key: &[u8]) -> AppResult<T> {
-    // Validate key length
-    if key.len() != 32 {
-        return Err(AppError::Encryption(
-            "encryption key must be 32 bytes".to_string()
-        ));
-    }
+pub fn decrypt_payload(encrypted: &str, key: &[u8]) -> AppResult<StudentFields> {
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| AppError::Encryption(format!("invalid key: {}", e)))?;
     
-    // Decode base64
-    let encrypted = BASE64.decode(ciphertext)
-        .map_err(|e| AppError::Encryption(format!("invalid base64: {}", e)))?;
+    let decoded = BASE64
+        .decode(encrypted)
+        .map_err(|e| AppError::Encryption(format!("base64 decode failed: {}", e)))?;
     
-    // Ensure minimum length (12-byte nonce + at least 16-byte tag)
-    if encrypted.len() < 28 {
+    if decoded.len() < 12 {
         return Err(AppError::Encryption("ciphertext too short".to_string()));
     }
     
-    // Extract nonce and ciphertext
-    let nonce = Nonce::from_slice(&encrypted[..12]);
-    let ct = &encrypted[12..];
+    let (nonce_bytes, ciphertext) = decoded.split_at(12);
+    let nonce = Nonce::from_slice(nonce_bytes);
     
-    // Create cipher
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| AppError::Encryption(format!("failed to create cipher: {}", e)))?;
-    
-    // Decrypt
     let plaintext = cipher
-        .decrypt(nonce, ct)
+        .decrypt(nonce, ciphertext)
         .map_err(|e| AppError::Encryption(format!("decryption failed: {}", e)))?;
     
-    // Deserialize JSON
-    let data = serde_json::from_slice(&plaintext)?;
+    let student: StudentFields = serde_json::from_slice(&plaintext)
+        .map_err(|e| AppError::Encryption(format!("deserialization failed: {}", e)))?;
     
-    Ok(data)
+    Ok(student)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::{Deserialize, Serialize};
-    
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct TestData {
-        name: String,
-        value: i32,
+
+    fn test_key() -> Vec<u8> {
+        let mut key = [0u8; 32];
+        OsRng.fill_bytes(&mut key);
+        key.to_vec()
     }
-    
+
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        let key = [0u8; 32];
-        let data = TestData {
-            name: "test".to_string(),
-            value: 42,
+        let key = test_key();
+        let student = StudentFields {
+            full_name: "Ivan Ivanov".to_string(),
+            diploma_number: "ДВС-2024-001234".to_string(),
+            specialty: "Computer Science".to_string(),
+            degree: "Бакалавр".to_string(),
+            year: 2024,
+            faculty: "Faculty of CS".to_string(),
         };
-        
-        let encrypted = encrypt_payload(&data, &key).unwrap();
-        let decrypted: TestData = decrypt_payload(&encrypted, &key).unwrap();
-        
-        assert_eq!(data, decrypted);
+
+        let encrypted = encrypt_payload(&student, &key).expect("encryption failed");
+        let decrypted: StudentFields = decrypt_payload(&encrypted, &key).expect("decryption failed");
+
+        assert_eq!(decrypted.full_name, student.full_name);
+        assert_eq!(decrypted.diploma_number, student.diploma_number);
+        assert_eq!(decrypted.specialty, student.specialty);
+        assert_eq!(decrypted.degree, student.degree);
+        assert_eq!(decrypted.year, student.year);
+        assert_eq!(decrypted.faculty, student.faculty);
     }
-    
+
     #[test]
     fn test_encrypt_produces_different_ciphertext() {
-        let key = [0u8; 32];
-        let data = TestData {
-            name: "test".to_string(),
-            value: 42,
+        let key = test_key();
+        let student = StudentFields {
+            full_name: "Test".to_string(),
+            diploma_number: "123".to_string(),
+            specialty: "Test".to_string(),
+            degree: "Test".to_string(),
+            year: 2024,
+            faculty: "Test".to_string(),
         };
-        
-        let encrypted1 = encrypt_payload(&data, &key).unwrap();
-        let encrypted2 = encrypt_payload(&data, &key).unwrap();
-        
-        // Different due to random nonce
+
+        let encrypted1 = encrypt_payload(&student, &key).expect("encryption failed");
+        let encrypted2 = encrypt_payload(&student, &key).expect("encryption failed");
+
         assert_ne!(encrypted1, encrypted2);
     }
-    
+
     #[test]
-    fn test_decrypt_wrong_key() {
-        let key1 = [0u8; 32];
-        let key2 = [1u8; 32];
-        let data = TestData {
-            name: "test".to_string(),
-            value: 42,
+    fn test_decrypt_wrong_key_fails() {
+        let key1 = test_key();
+        let mut key2 = [0u8; 32];
+        OsRng.fill_bytes(&mut key2);
+
+        let student = StudentFields {
+            full_name: "Test".to_string(),
+            diploma_number: "123".to_string(),
+            specialty: "Test".to_string(),
+            degree: "Test".to_string(),
+            year: 2024,
+            faculty: "Test".to_string(),
         };
-        
-        let encrypted = encrypt_payload(&data, &key1).unwrap();
-        let result: Result<TestData, _> = decrypt_payload(&encrypted, &key2);
-        
-        assert!(result.is_err());
-    }
-    
-    #[test]
-    fn test_invalid_key_length() {
-        let key = [0u8; 16]; // Wrong length
-        let data = TestData {
-            name: "test".to_string(),
-            value: 42,
-        };
-        
-        let result = encrypt_payload(&data, &key);
+
+        let encrypted = encrypt_payload(&student, &key1).expect("encryption failed");
+        let result = decrypt_payload(&encrypted, &key2);
+
         assert!(result.is_err());
     }
 }

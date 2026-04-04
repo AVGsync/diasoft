@@ -1,0 +1,14 @@
+APP__KAFKA__BROKERS=25.41.91.56:9092
+app__KAFKA__GROUP_id=processing-engine
+app__KAFKA__INPUT_topic=diplomas.raw_tasks
+app__KAFKA__output_topic=diplomas.processing_results
+
+APP__DATABASE__URL=postgres://gateway_user:gateway_password@25.41.91.56:5432/postgres?sslmode=disable
+
+APP__JWT__AUTH_hmac_secret=your-secret-key-change-in-production
+
+APP__APP__verification_base_url=http://localhost:8080
+APP__APP__encryption_key=MDEyMzQ1Njc4owFiY6ODlhYmNkZjAxMjUzaVj
+
+ # Test configuration
+# Run with: cargo test --no-run-argument to needed

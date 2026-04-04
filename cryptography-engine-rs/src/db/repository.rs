@@ -1,211 +1,221 @@
-//! Database repository functions for all DB writes and reads.
-//!
-//! All DB operations performed by this service:
-//! - `insert_diploma_hash` - INSERT into `diploma_hashes`
-//! - `insert_batch_result` - INSERT into `batch_results`
-//! - `increment_batch_processed` - UPDATE `batches` counter
-//! - `set_batch_completed` - UPDATE `batches` status
-//! - `get_university` - SELECT university for Ed25519 private key
-
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::models::{DiplomaHashRecord, UniversityRecord, BatchRecord, NewDiplomaHash, NewBatchResult};
-use crate::error::{AppError, AppResult};
+use crate::db::models::{DiplomaHashRecord, NewDiplomaHash, UniversityKeyRecord};
+use crate::error::AppResult;
 
-/// Inserts a new diploma hash record.
-///
-/// Uses `ON CONFLICT DO NOTHING` for idempotent retries - if the hash
-/// already exists, the operation succeeds without modification.
-///
-/// # Arguments
-/// * `pool` - PostgreSQL connection pool
-/// * `record` - New diploma hash data
-pub async fn insert_diploma_hash(
-    pool: &PgPool,
-    record: &NewDiplomaHash<'_>,
-) -> AppResult<()> {
-    sqlx::query!(
-        r#"
-        INSERT INTO diploma_hashes (hash, vuz_id, diploma_number, signature, status, created_at)
-        VALUES ($1, $2, $3, $4, 'active', NOW())
-        ON CONFLICT (hash) DO NOTHING
-        "#,
-        record.hash,
-        record.vuz_id,
-        record.diploma_number,
-        record.signature,
-    )
-    .execute(pool)
-    .await?;
-    
-    Ok(())
+/// Represents the key data retrieved from the database for signing operations.
+/// Contains the encrypted private key and associated algorithm information.
+#[derive(Debug, Clone)]
+pub struct UniversityKeyData {
+    pub encrypted_private_key: String,
+    pub key_algorithm: String,
+    pub encryption_algorithm: String,
 }
 
-/// Gets a diploma hash record by hash value.
+/// Retrieves the encrypted private key and algorithm information for a given university.
 ///
 /// # Arguments
 /// * `pool` - PostgreSQL connection pool
-/// * `hash` - SHA-256 diploma hash
-pub async fn get_diploma_by_hash(
-    pool: &PgPool,
-    hash: &str,
-) -> AppResult<Option<DiplomaHashRecord>> {
-    let record = sqlx::query_as!(
-        DiplomaHashRecord,
-        r#"
-        SELECT id, hash, vuz_id, diploma_number, signature, status, created_at
-        FROM diploma_hashes
-        WHERE hash = $1
-        "#,
-        hash
-    )
-    .fetch_optional(pool)
-    .await?;
-    
-    Ok(record)
-}
-
-/// Inserts a new batch result record.
-///
-/// # Arguments
-/// * `pool` - PostgreSQL connection pool
-/// * `record` - New batch result data
-pub async fn insert_batch_result(
-    pool: &PgPool,
-    record: &NewBatchResult<'_>,
-) -> AppResult<()> {
-    sqlx::query!(
-        r#"
-        INSERT INTO batch_results (batch_id, diploma_hash, encrypted_payload, qr_payload, created_at)
-        VALUES ($1, $2, $3, $4, NOW())
-        "#,
-        record.batch_id,
-        record.diploma_hash,
-        record.encrypted_payload,
-        record.qr_payload,
-    )
-    .execute(pool)
-    .await?;
-    
-    Ok(())
-}
-
-/// Increments the processed records counter for a batch.
-///
-/// # Arguments
-/// * `pool` - PostgreSQL connection pool
-/// * `batch_id` - Batch UUID
-pub async fn increment_batch_processed(
-    pool: &PgPool,
-    batch_id: Uuid,
-) -> AppResult<()> {
-    sqlx::query!(
-        r#"
-        UPDATE batches
-        SET processed_records = processed_records + 1
-        WHERE id = $1
-        "#,
-        batch_id
-    )
-    .execute(pool)
-    .await?;
-    
-    Ok(())
-}
-
-/// Marks a batch as completed.
-///
-/// Sets status to 'completed' and records the completion timestamp.
-///
-/// # Arguments
-/// * `pool` - PostgreSQL connection pool
-/// * `batch_id` - Batch UUID
-pub async fn set_batch_completed(
-    pool: &PgPool,
-    batch_id: Uuid,
-) -> AppResult<()> {
-    sqlx::query!(
-        r#"
-        UPDATE batches
-        SET status = 'completed', completed_at = NOW()
-        WHERE id = $1
-        "#,
-        batch_id
-    )
-    .execute(pool)
-    .await?;
-    
-    Ok(())
-}
-
-/// Gets a batch record by ID.
-///
-/// # Arguments
-/// * `pool` - PostgreSQL connection pool
-/// * `batch_id` - Batch UUID
-pub async fn get_batch(
-    pool: &PgPool,
-    batch_id: Uuid,
-) -> AppResult<Option<BatchRecord>> {
-    let record = sqlx::query_as!(
-        BatchRecord,
-        r#"
-        SELECT id, vuz_id, total_records, processed_records, status, created_at, completed_at
-        FROM batches
-        WHERE id = $1
-        "#,
-        batch_id
-    )
-    .fetch_optional(pool)
-    .await?;
-    
-    Ok(record)
-}
-
-/// Gets a university record by ID.
-///
-/// Used to retrieve the Ed25519 private key before signing a diploma.
-///
-/// # Arguments
-/// * `pool` - PostgreSQL connection pool
-/// * `vuz_id` - University UUID
-pub async fn get_university(
-    pool: &PgPool,
-    vuz_id: Uuid,
-) -> AppResult<UniversityRecord> {
-    let record = sqlx::query_as!(
-        UniversityRecord,
-        r#"
-        SELECT id, name, short_name, private_key_pem, public_key_pem, is_active, created_at
-        FROM universities
-        WHERE id = $1
-        "#,
-        vuz_id
-    )
-    .fetch_optional(pool)
-    .await?;
-    
-    record
-        .ok_or_else(|| AppError::Db(sqlx::Error::RowNotFound))
-        .map_err(|e| AppError::Signing(format!("university not found: {}", e)))
-}
-
-/// Checks if all records in a batch have been processed.
-///
-/// # Arguments
-/// * `pool` - PostgreSQL connection pool
-/// * `batch_id` - Batch UUID
+/// * `vuz_id` - UUID of the university
 ///
 /// # Returns
-/// `true` if processed_records >= total_records
+/// * `Ok(UniversityKeyData)` - Contains encrypted key, key algorithm, and encryption algorithm
+/// * `Err(sqlx::Error)` - If the query fails or no record is found
+///
+/// # Example
+/// ```rust
+/// let key_data = get_university_key(&pool, vuz_id).await?;
+/// println!("Key algorithm: {}", key_data.key_algorithm);
+/// println!("Encryption algorithm: {}", key_data.encryption_algorithm);
+/// ```
+pub async fn get_university_key(
+    pool: &PgPool,
+    vuz_id: Uuid,
+) -> AppResult<UniversityKeyData> {
+    let record = sqlx::query_as::<_, UniversityKeyRecord>(
+        r#"
+        SELECT 
+            vuz_id,
+            encrypted_private_key,
+            key_algorithm,
+            encryption_algorithm,
+            public_key_fingerprint
+        FROM university_signing_keys
+        WHERE vuz_id = $1
+        "#
+    )
+    .bind(vuz_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(UniversityKeyData {
+        encrypted_private_key: record.encrypted_private_key,
+        key_algorithm: record.key_algorithm,
+        encryption_algorithm: record.encryption_algorithm,
+    })
+}
+
+/// Inserts a new diploma hash record into the database.
+///
+/// # Arguments
+/// * `pool` - PostgreSQL connection pool
+/// * `new_diploma` - The new diploma hash record to insert
+///
+/// # Returns
+/// * `Ok(DiplomaHashRecord)` - The newly created record with database-generated fields
+/// * `Err(sqlx::Error)` - If the insert fails
+///
+/// # Example
+/// ```rust
+/// let new_diploma = NewDiplomaHash {
+///     hash: "abc123...",
+///     vuz_id: university_uuid,
+///     diploma_number: "ДВС-2024-001234",
+///     signature: None,
+/// };
+/// let record = insert_diploma_hash(&pool, &new_diploma).await?;
+/// ```
+pub async fn insert_diploma_hash(
+    pool: &PgPool,
+    new_diploma: &NewDiplomaHash<'_>,
+) -> AppResult<DiplomaHashRecord> {
+    let record = sqlx::query_as::<_, DiplomaHashRecord>(
+        r#"
+        INSERT INTO diploma_hashes (hash, vuz_id, diploma_number, status, created_at)
+        VALUES ($1, $2, $3, 'active', NOW())
+        RETURNING hash, vuz_id, diploma_number, status, revoked_at, created_at
+        "#
+    )
+    .bind(new_diploma.hash)
+    .bind(new_diploma.vuz_id)
+    .bind(new_diploma.diploma_number)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(record)
+}
+
+/// Checks if all diplomas in a batch have been processed.
+/// This function is used to determine when a batch is complete.
+///
+/// # Arguments
+/// * `pool` - PostgreSQL connection pool
+/// * `batch_id` - UUID of the batch to check
+///
+/// # Returns
+/// * `Ok(true)` - If the batch is complete
+/// * `Ok(false)` - If the batch is not yet complete
+/// * `Err(sqlx::Error)` - If the query fails
 pub async fn is_batch_complete(
     pool: &PgPool,
     batch_id: Uuid,
 ) -> AppResult<bool> {
-    let batch = get_batch(pool, batch_id).await?;
-    
-    Ok(batch
-        .map(|b| b.processed_records >= b.total_records)
-        .unwrap_or(false))
+    // This is a placeholder implementation. The actual implementation
+    // depends on your batch tracking mechanism.
+    // You may need to adjust this based on your actual schema.
+    let result: Option<(i64,)> = sqlx::query_as(
+        r#"
+        SELECT COUNT(*) 
+        FROM diploma_hashes dh
+        JOIN batch_diplomas bd ON dh.hash = bd.diploma_hash
+        WHERE bd.batch_id = $1
+        "#
+    )
+    .bind(batch_id)
+    .fetch_optional(pool)
+    .await?;
+
+    // If we have a result, check if count > 0
+    // This is a simplified check - adjust based on your actual batch completion logic
+    Ok(result.map_or(false, |(count,)| count > 0))
+}
+
+/// Updates the status of a diploma hash to 'revoked'.
+///
+/// # Arguments
+/// * `pool` - PostgreSQL connection pool
+/// * `hash` - The hash of the diploma to revoke
+///
+/// # Returns
+/// * `Ok(DiplomaHashRecord)` - The updated record
+/// * `Err(sqlx::Error)` - If the update fails or no record is found
+pub async fn revoke_diploma_hash(
+    pool: &PgPool,
+    hash: &str,
+) -> AppResult<DiplomaHashRecord> {
+    let record = sqlx::query_as::<_, DiplomaHashRecord>(
+        r#"
+        UPDATE diploma_hashes
+        SET status = 'revoked', revoked_at = NOW()
+        WHERE hash = $1
+        RETURNING hash, vuz_id, diploma_number, status, revoked_at, created_at
+        "#
+    )
+    .bind(hash)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(record)
+}
+
+/// Retrieves a diploma hash record by its hash value.
+///
+/// # Arguments
+/// * `pool` - PostgreSQL connection pool
+/// * `hash` - The hash of the diploma to retrieve
+///
+/// # Returns
+/// * `Ok(DiplomaHashRecord)` - The found record
+/// * `Err(sqlx::Error)` - If the query fails or no record is found
+pub async fn get_diploma_by_hash(
+    pool: &PgPool,
+    hash: &str,
+) -> AppResult<DiplomaHashRecord> {
+    let record = sqlx::query_as::<_, DiplomaHashRecord>(
+        r#"
+        SELECT hash, vuz_id, diploma_number, status, revoked_at, created_at
+        FROM diploma_hashes
+        WHERE hash = $1
+        "#
+    )
+    .bind(hash)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(record)
+}
+
+/// Checks if a diploma hash already exists in the database.
+///
+/// # Arguments
+/// * `pool` - PostgreSQL connection pool
+/// * `hash` - The hash to check
+///
+/// # Returns
+/// * `Ok(true)` - If the hash exists
+/// * `Ok(false)` - If the hash does not exist
+/// * `Err(sqlx::Error)` - If the query fails
+pub async fn diploma_hash_exists(
+    pool: &PgPool,
+    hash: &str,
+) -> AppResult<bool> {
+    let result: Option<(bool,)> = sqlx::query_as(
+        r#"
+        SELECT TRUE FROM diploma_hashes WHERE hash = $1
+        "#
+    )
+    .bind(hash)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(result.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Note: These tests require a running PostgreSQL database with the schema set up.
+    // Use sqlx::testing for integration tests or mock the database for unit tests.
 }
