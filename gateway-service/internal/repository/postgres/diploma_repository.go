@@ -113,6 +113,56 @@ func (r *DiplomaRepository) GetBatch(ctx context.Context, batchID, vuzID string)
 	return batch, nil
 }
 
+func (r *DiplomaRepository) ListBatches(ctx context.Context, vuzID string, limit int) ([]*model.Batch, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := r.database.db.QueryContext(
+		ctx,
+		`SELECT
+			b.id,
+			b.vuz_id,
+			b.status,
+			b.total_records,
+			b.processed_records,
+			COALESCE((SELECT COUNT(*) FROM batch_results br WHERE br.batch_id = b.id AND br.status = 'error'), 0),
+			b.created_at,
+			b.completed_at
+		 FROM batches b
+		 WHERE b.vuz_id = $1
+		 ORDER BY b.created_at DESC
+		 LIMIT $2`,
+		vuzID,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]*model.Batch, 0)
+	for rows.Next() {
+		item := &model.Batch{}
+		if err := rows.Scan(
+			&item.ID,
+			&item.VUZID,
+			&item.Status,
+			&item.TotalRecords,
+			&item.ProcessedRecords,
+			&item.FailedRecords,
+			&item.CreatedAt,
+			&item.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		result = append(result, item)
+	}
+
+	return result, rows.Err()
+}
+
 func (r *DiplomaRepository) GetBatchDownloadRows(ctx context.Context, batchID, vuzID string) ([]*model.BatchDownloadRow, error) {
 	rows, err := r.database.db.QueryContext(
 		ctx,
@@ -623,82 +673,6 @@ func (r *DiplomaRepository) IncrementShareLinkUsage(ctx context.Context, token s
 		token,
 	)
 	return err
-}
-
-func (r *DiplomaRepository) GetVerificationSnapshot(ctx context.Context, diplomaHash string) (*model.VerificationSnapshot, error) {
-	item := &model.VerificationSnapshot{}
-	var (
-		publicKey     sql.NullString
-		diplomaNo     string
-		qrPayload     string
-		metaSpecialty sql.NullString
-		metaDegree    sql.NullString
-		metaFaculty   sql.NullString
-		metaYear      sql.NullInt64
-	)
-
-	err := r.database.db.QueryRowContext(
-		ctx,
-		`SELECT
-			dh.hash,
-			dh.diploma_number,
-			result.qr_payload,
-			meta.specialty,
-			meta.degree,
-			meta.faculty,
-			meta.year,
-			u.id,
-			u.name,
-			u.public_key,
-			dh.status,
-			dh.created_at
-		 FROM diploma_hashes dh
-		 JOIN universities u ON u.id = dh.vuz_id
-		 JOIN batch_results result ON result.diploma_hash = dh.hash
-		 LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
-		 WHERE dh.hash = $1
-		   AND result.status = 'ok'
-		 LIMIT 1`,
-		diplomaHash,
-	).Scan(
-		&item.DiplomaHash,
-		&diplomaNo,
-		&qrPayload,
-		&metaSpecialty,
-		&metaDegree,
-		&metaFaculty,
-		&metaYear,
-		&item.UniversityID,
-		&item.UniversityName,
-		&publicKey,
-		&item.Status,
-		&item.CreatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	payload, err := parseQRPayload(r.qrPayloadDecoder, qrPayload)
-	if err != nil {
-		return nil, err
-	}
-
-	item.DiplomaNumber = diplomaNo
-	if strings.TrimSpace(payload.DiplomaNumber) != "" {
-		item.DiplomaNumber = payload.DiplomaNumber
-	}
-	item.FullName = payload.FullName
-	item.Specialty = firstNonEmpty(payload.Specialty, nullStringValue(metaSpecialty))
-	item.Degree = firstNonEmpty(payload.Degree, nullStringValue(metaDegree))
-	item.Faculty = firstNonEmpty(payload.Faculty, nullStringValue(metaFaculty))
-	item.Year = firstNonZero(payload.Year, nullIntValue(metaYear))
-	item.BatchResultJWT = qrPayload
-
-	if publicKey.Valid {
-		item.PublicKey = &publicKey.String
-	}
-
-	return item, nil
 }
 
 func (r *DiplomaRepository) insertBatchResultErrorTx(ctx context.Context, tx *sql.Tx, batchID string, recordIndex int, message string) error {

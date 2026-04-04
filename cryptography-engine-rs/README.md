@@ -1,5 +1,7 @@
 # Crypto Engine (cryptography-engine-rs)
 
+> Current contract: `diploma_hash = SHA-256(diploma_number|full_name|specialty|degree|faculty|year|vuz_id|salt)` and QR JWT uses `EdDSA` with encrypted `enc` payload.
+
 A Stateless cryptographic processing worker for the diploma verification system.
 
 ## Overview
@@ -19,10 +21,10 @@ Gateway
       [Crypto Engine]
         1. Fetch university Ed25519 private key from DB (universities table)
         2. Generate random 32-byte salt
-        3. SHA-256(full_name|diploma_number|specialty|year|vuz_id|salt) → diploma_hash
+        3. SHA-256(diploma_number|full_name|specialty|degree|faculty|year|vuz_id|salt) → diploma_hash
         4. Ed25519.sign(diploma_hash, vuz_private_key) → signature
         5. Encrypt student payload (AES-GCM) → encrypted_payload
-        6. RS256 JWT { diploma_hash, salt, student fields, exp: null } → qr_payload
+        6. EdDSA JWT { diploma_hash, salt, student fields, exp: null } → qr_payload
         7. INSERT diploma_hashes (hash, vuz_id, diploma_number, signature)
         8. INSERT batch_results (batch_id, diploma_hash, encrypted_payload, qr_payload)
         9. UPDATE batches counter / status
@@ -100,7 +102,7 @@ cryptography-engine-rs/
 | `AppConfig` | Top-level configuration container |
 | `KafkaConfig` | Kafka brokers, topics, consumer group |
 | `DatabaseConfig` | PostgreSQL connection URL |
-| `JwtConfig` | RSA private key (QR JWTs), HMAC secret (share-links) |
+| `JwtConfig` | Ed25519 private key (QR JWTs), HMAC secret (share-links) |
 | `AppSettings` | Verification base URL, encryption key |
 
 **Configuration sources:**
@@ -189,7 +191,7 @@ hash = SHA-256(raw) → 64-char hex string
 **Token types:**
 | Type | Algorithm | Expiration | Purpose |
 |------|-----------|------------|---------|
-| QR JWT | RS256 | None (eternal) | Embedded in QR codes, revocation via DB |
+| QR JWT | EdDSA | None (eternal) | Embedded in QR codes, revocation via DB |
 | Share-link JWT | HS256 | 72h default | Time-limited sharing links |
 
 **Functions:**
@@ -306,7 +308,7 @@ hash = SHA-256(raw) → 64-char hex string
 3. Compute diploma hash (SHA-256)
 4. Sign hash with Ed25519
 5. Encrypt student payload with AES-GCM
-6. Create QR JWT (RS256)
+6. Create QR JWT (EdDSA)
 7. Build QR verification URL
 8. Insert diploma_hash record
 9. Insert batch_result record
@@ -341,13 +343,13 @@ APP__KAFKA__OUTPUT_TOPIC=diplomas.processing_results
 # Postgres
 APP__DATABASE__URL=postgres://user:pass@localhost:5432/diplomas_db
 
-# JWT — platform RS256 key (for QR tokens, eternal)
-APP__JWT__QR_RSA_PRIVATE_KEY_PEM="-----BEGIN RSA PRIVATE KEY-----\n..."
+# JWT — university Ed25519 key (for QR tokens, eternal)
+APP__JWT__QR_ED25519_PRIVATE_KEY_PEM="-----BEGIN PRIVATE KEY-----\n..."
 # JWT — HMAC secret (for share-link tokens, HS256)
 APP__JWT__AUTH_HMAC_SECRET=your-256-bit-secret-here
 
 # Application
-APP__APP__VERIFICATION_BASE_URL=https://platform.ru/api/v1/verify
+APP__APP__VERIFICATION_BASE_URL=https://platform.ru/verify?payload=
 APP__APP__ENCRYPTION_KEY=<64-char hex string>
 
 # Logging

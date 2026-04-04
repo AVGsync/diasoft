@@ -54,7 +54,7 @@ Ok(ProcessingResult::success(
 The `.env` file contains hardcoded sensitive values that should NEVER be in source control:
 
 ```
-DATABASE_URL=postgres://gateway_user:gateway_password@25.41.91.56:5432/postgres?sslmode=disable
+DATABASE_URL=postgres://gateway_user:gateway_password@localhost:5432/postgres?sslmode=disable
 APP__JWT__AUTH_HMAC_SECRET=your-secret-key-change-in-production
 APP__APP__ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 ```
@@ -63,7 +63,7 @@ APP__APP__ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 - Database credentials with password in plaintext
 - JWT secret is a placeholder value
 - Master encryption key is hardcoded (and appears to be hex-encoded "0123456789abcdef..." pattern)
-- IP address `25.41.91.56` exposed (appears to be a internal/Yggdrasil IP)
+- Host-specific database address exposed in config
 
 **Recommendation:** 
 - Remove `.env` from tracking (add to `.gitignore`)

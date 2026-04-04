@@ -159,7 +159,7 @@ func (g *Generator) BuildBatch(rows []*model.BatchDownloadRow) ([]byte, error) {
 			continue
 		}
 
-		qrURL := fmt.Sprintf("%s/api/v1/verify?payload=%s", g.publicBaseURL, url.QueryEscape(row.QRPayload))
+		qrURL := fmt.Sprintf("%s/verify?payload=%s", g.publicBaseURL, url.QueryEscape(row.QRPayload))
 		pngBytes, err := g.qrGenerator.PNG(qrURL, 160)
 		if err != nil {
 			return nil, err

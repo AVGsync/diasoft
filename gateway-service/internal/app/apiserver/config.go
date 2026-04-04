@@ -19,6 +19,13 @@ type Config struct {
 	ShareTokenTTL             time.Duration      `toml:"share_token_ttl"`
 	BootstrapAdminEmail       string             `toml:"bootstrap_admin_email"`
 	BootstrapAdminPassword    string             `toml:"bootstrap_admin_password"`
+	DemoUniversityName        string             `toml:"demo_university_name"`
+	DemoUniversityVUZCode     string             `toml:"demo_university_vuz_code"`
+	DemoUniversityINN         string             `toml:"demo_university_inn"`
+	DemoUniversityOGRN        string             `toml:"demo_university_ogrn"`
+	DemoUniversityEmail       string             `toml:"demo_university_email"`
+	DemoUniversityPassword    string             `toml:"demo_university_password"`
+	DemoUniversityPrivateKey  string             `toml:"demo_university_private_key_path"`
 	DB                        *postgres.Config   `toml:"db"`
 	Kafka                     *kafkainfra.Config `toml:"kafka"`
 }
@@ -27,7 +34,7 @@ func NewConfig() *Config {
 	return &Config{
 		BindAddr:                  ":8080",
 		LogLevel:                  "debug",
-		PublicBaseURL:             "http://localhost:8080",
+		PublicBaseURL:             "http://localhost:3000",
 		JWTSecret:                 "gateway-access-secret",
 		ShareJWTSecret:            "gateway-share-secret",
 		SigningKeysMasterKey:      "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
@@ -35,7 +42,14 @@ func NewConfig() *Config {
 		AccessTokenTTL:            24 * time.Hour,
 		ShareTokenTTL:             72 * time.Hour,
 		BootstrapAdminEmail:       "admin@platform.local",
-		BootstrapAdminPassword:    "admin12345",
+		BootstrapAdminPassword:    "Admin12345!",
+		DemoUniversityName:        "",
+		DemoUniversityVUZCode:     "",
+		DemoUniversityINN:         "",
+		DemoUniversityOGRN:        "",
+		DemoUniversityEmail:       "",
+		DemoUniversityPassword:    "",
+		DemoUniversityPrivateKey:  "",
 		DB:                        postgres.NewConfig(),
 		Kafka:                     kafkainfra.NewConfig(),
 	}

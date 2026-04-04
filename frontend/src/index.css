@@ -1,0 +1,186 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #24305e;
+  background:
+    radial-gradient(circle at top left, rgba(248, 233, 161, 0.55), transparent 34%),
+    radial-gradient(circle at top right, rgba(168, 208, 230, 0.42), transparent 38%),
+    linear-gradient(180deg, #fffdfa 0%, #f6f8fc 100%);
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: auto;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.shell-grid {
+  background:
+    radial-gradient(circle at top left, rgba(248, 233, 161, 0.26), transparent 28%),
+    radial-gradient(circle at top right, rgba(168, 208, 230, 0.22), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 248, 252, 0.92));
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(55, 71, 133, 0.12);
+}
+
+.hero-card {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.84)),
+    linear-gradient(135deg, rgba(248, 233, 161, 0.18), rgba(168, 208, 230, 0.2));
+  border: 1px solid rgba(55, 71, 133, 0.12);
+  overflow: hidden;
+  position: relative;
+}
+
+.hero-card::after {
+  display: none;
+}
+
+.accent-card {
+  background:
+    linear-gradient(160deg, rgba(248, 233, 161, 0.62), rgba(255, 255, 255, 0.86)),
+    linear-gradient(135deg, rgba(168, 208, 230, 0.2), rgba(247, 108, 108, 0.14));
+  border: 1px solid rgba(55, 71, 133, 0.12);
+}
+
+.mono-kicker {
+  font-family: "IBM Plex Mono", monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brand-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #374785, #24305e);
+  color: #f8e9a1;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.doc-code {
+  margin: 0;
+  overflow-x: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(55, 71, 133, 0.12);
+  background: rgba(36, 48, 94, 0.96);
+  padding: 16px 18px;
+  color: #f8e9a1;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.glass-card,
+.hero-card,
+.accent-card,
+.brand-badge {
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.ant-layout {
+  background: transparent !important;
+}
+
+.ant-card {
+  border-color: rgba(55, 71, 133, 0.12) !important;
+}
+
+.ant-btn-default {
+  border-color: rgba(55, 71, 133, 0.18);
+  color: #24305e;
+}
+
+.ant-btn-text {
+  color: #374785;
+}
+
+.ant-btn-primary {
+  background: #374785;
+}
+
+.ant-btn-primary:hover {
+  background: #24305e !important;
+}
+
+.ant-wave {
+  display: none !important;
+}
+
+.ant-tabs-ink-bar,
+.ant-tabs-tab,
+.ant-tabs-tabpane,
+.ant-motion-collapse,
+.ant-collapse-content {
+  animation: none !important;
+  transition-duration: 120ms !important;
+}
+
+.ant-alert-info {
+  border-color: rgba(168, 208, 230, 0.4);
+  background: rgba(168, 208, 230, 0.18);
+}
+
+.ant-table-wrapper .ant-table {
+  background: transparent;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  background: rgba(168, 208, 230, 0.12);
+  color: #24305e;
+}
+
+@media (max-width: 768px) {
+  .brand-link {
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

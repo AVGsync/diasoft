@@ -522,7 +522,7 @@ Response:
 
 ```json
 {
-  "share_url": "http://localhost:8080/api/v1/student/share/<token>",
+  "share_url": "http://localhost:3000/share/<token>",
   "token": "<jwt>",
   "expires_at": "2026-04-07T12:00:00Z"
 }
@@ -542,7 +542,7 @@ Response:
 
 ### 5.7 Публичная верификация
 
-#### `GET /api/v1/verify?payload=<qr_jwt>`
+#### `GET /verify?payload=<qr_jwt>`
 
 Назначение:
 
@@ -554,7 +554,7 @@ Response:
 2. извлечь claims;
 3. загрузить `public_key` ВУЗа;
 4. проверить подпись JWT через `Ed25519`;
-5. пересчитать `SHA-256(full_name|diploma_number|specialty|year|vuz_id|salt)`;
+5. пересчитать `SHA-256(diploma_number|full_name|specialty|degree|faculty|year|vuz_id|salt)`;
 6. сравнить результат с `diploma_hashes.hash`;
 7. проверить статус диплома в `diploma_hashes`.
 
@@ -813,7 +813,7 @@ Consumer:
 4. `Processing Engine` читает задачу.
 5. `Processing Engine` загружает и расшифровывает private key ВУЗа из PostgreSQL.
 6. `Processing Engine` генерирует `salt`.
-7. `Processing Engine` считает `diploma_hash = SHA-256(full_name|diploma_number|specialty|year|vuz_id|salt)`.
+7. `Processing Engine` считает `diploma_hash = SHA-256(diploma_number|full_name|specialty|degree|faculty|year|vuz_id|salt)`.
 8. `Processing Engine` собирает claims для QR JWT.
 9. `Processing Engine` подписывает QR JWT через `Ed25519`.
 10. `Processing Engine` отправляет результат в `diplomas.processing_results`.
@@ -832,13 +832,13 @@ Consumer:
 
 ### 10.5 Публичная проверка QR
 
-1. Сканер вызывает `GET /api/v1/verify?payload=<qr_jwt>`.
-2. Gateway извлекает claims из QR JWT.
-3. Gateway загружает `public_key` ВУЗа.
-4. Gateway проверяет подпись JWT через `Ed25519`.
-5. Gateway пересчитывает `SHA-256` по данным из claims.
-6. Gateway ищет хеш в `diploma_hashes`.
-7. Gateway проверяет статус диплома:
+1. Сканер вызывает `GET /verify?payload=<qr_jwt>`.
+2. `pubver` извлекает claims из QR JWT.
+3. `pubver` загружает `public_key` ВУЗа.
+4. `pubver` проверяет подпись JWT через `Ed25519`.
+5. `pubver` пересчитывает `SHA-256` по данным из claims.
+6. `pubver` ищет хеш в `diploma_hashes`.
+7. `pubver` проверяет статус диплома:
    - `active`
    - `revoked`
-8. Gateway возвращает результат верификации.
+8. `pubver` возвращает результат верификации.

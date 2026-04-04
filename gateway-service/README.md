@@ -82,4 +82,4 @@ go run ./cmd/apiserver -config-path configs/apiserver.toml
 - `POST /api/v1/student/share`
 - `GET /api/v1/student/qr`
 - `GET /api/v1/student/share/{token}`
-- `GET /api/v1/verify`
+- Public verification moved to `pubver`: `GET /api/v1/verify`

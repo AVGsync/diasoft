@@ -33,6 +33,12 @@ func main() {
 }
 
 func applyEnvOverrides(config *apiserver.Config) {
+	if value := os.Getenv("BIND_ADDR"); value != "" {
+		config.BindAddr = value
+	}
+	if value := os.Getenv("LOG_LEVEL"); value != "" {
+		config.LogLevel = value
+	}
 	if value := os.Getenv("DATABASE_URL"); value != "" {
 		config.DB.DatabaseURL = value
 	}
@@ -45,6 +51,9 @@ func applyEnvOverrides(config *apiserver.Config) {
 	if value := os.Getenv("SIGNING_KEYS_MASTER_KEY"); value != "" {
 		config.SigningKeysMasterKey = value
 	}
+	if value := os.Getenv("QR_PAYLOAD_ENCRYPTION_SECRET"); value != "" {
+		config.QRPayloadEncryptionSecret = value
+	}
 	if value := os.Getenv("PUBLIC_BASE_URL"); value != "" {
 		config.PublicBaseURL = value
 	}
@@ -53,6 +62,27 @@ func applyEnvOverrides(config *apiserver.Config) {
 	}
 	if value := os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"); value != "" {
 		config.BootstrapAdminPassword = value
+	}
+	if value := os.Getenv("DEMO_UNIVERSITY_NAME"); value != "" {
+		config.DemoUniversityName = value
+	}
+	if value := os.Getenv("DEMO_UNIVERSITY_VUZ_CODE"); value != "" {
+		config.DemoUniversityVUZCode = value
+	}
+	if value := os.Getenv("DEMO_UNIVERSITY_INN"); value != "" {
+		config.DemoUniversityINN = value
+	}
+	if value := os.Getenv("DEMO_UNIVERSITY_OGRN"); value != "" {
+		config.DemoUniversityOGRN = value
+	}
+	if value := os.Getenv("DEMO_UNIVERSITY_EMAIL"); value != "" {
+		config.DemoUniversityEmail = value
+	}
+	if value := os.Getenv("DEMO_UNIVERSITY_PASSWORD"); value != "" {
+		config.DemoUniversityPassword = value
+	}
+	if value := os.Getenv("DEMO_UNIVERSITY_PRIVATE_KEY_PATH"); value != "" {
+		config.DemoUniversityPrivateKey = value
 	}
 	if value := os.Getenv("KAFKA_BROKERS"); value != "" {
 		config.Kafka.Brokers = splitAndTrim(value)

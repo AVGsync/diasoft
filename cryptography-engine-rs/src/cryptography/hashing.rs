@@ -24,10 +24,12 @@ pub fn generate_salt() -> AppResult<String> {
 
 pub fn hash_diploma(student: &StudentFieldsForHash, vuz_id: Uuid, salt: &str) -> AppResult<String> {
     let canonical = format!(
-        "{}|{}|{}|{}|{}|{}",
-        student.full_name,
+        "{}|{}|{}|{}|{}|{}|{}|{}",
         student.diploma_number,
+        student.full_name,
         student.specialty,
+        student.degree,
+        student.faculty,
         student.year,
         vuz_id,
         salt
@@ -111,8 +113,8 @@ mod tests {
             full_name: "Ivan Ivanov",
             diploma_number: "ДВС-2024-001234",
             specialty: "Computer Science",
-            degree: "aAafag",
-            faculty: "Agag",
+            degree: "Bachelor",
+            faculty: "FKN",
             year: 2024,
         };
         let salt = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

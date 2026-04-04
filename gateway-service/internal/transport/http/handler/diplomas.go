@@ -192,7 +192,7 @@ func parseCSV(reader io.Reader) ([]model.DiplomaUploadRecord, error) {
 
 	headerIndex := map[string]int{}
 	for index, header := range rows[0] {
-		headerIndex[strings.TrimSpace(header)] = index
+		headerIndex[normalizeCSVHeader(header)] = index
 	}
 
 	requiredHeaders := []string{"full_name", "diploma_number", "specialty", "degree", "faculty", "year"}
@@ -227,4 +227,9 @@ func parseCSV(reader io.Reader) ([]model.DiplomaUploadRecord, error) {
 	}
 
 	return result, nil
+}
+
+func normalizeCSVHeader(header string) string {
+	normalized := strings.TrimSpace(header)
+	return strings.TrimPrefix(normalized, "\uFEFF")
 }

@@ -49,6 +49,53 @@ func (r *UniversityRepository) Create(ctx context.Context, request *model.Regist
 	return university, nil
 }
 
+func (r *UniversityRepository) UpsertDemo(ctx context.Context, request *model.RegisterUniversityRequest, passwordHash, status string) (*model.University, error) {
+	university := &model.University{}
+	var publicKey sql.NullString
+
+	err := r.database.db.QueryRowContext(
+		ctx,
+		`INSERT INTO universities (name, vuz_code, inn, ogrn, email, password_hash, status)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 ON CONFLICT (email) DO UPDATE
+		 SET
+			name = EXCLUDED.name,
+			vuz_code = EXCLUDED.vuz_code,
+			inn = EXCLUDED.inn,
+			ogrn = EXCLUDED.ogrn,
+			password_hash = EXCLUDED.password_hash,
+			status = EXCLUDED.status
+		 RETURNING id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at`,
+		request.Name,
+		request.VuzCode,
+		request.INN,
+		request.OGRN,
+		request.Email,
+		passwordHash,
+		status,
+	).Scan(
+		&university.ID,
+		&university.Name,
+		&university.VuzCode,
+		&university.INN,
+		&university.OGRN,
+		&university.Email,
+		&university.PasswordHash,
+		&publicKey,
+		&university.Status,
+		&university.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if publicKey.Valid {
+		university.PublicKey = &publicKey.String
+	}
+
+	return university, nil
+}
+
 func (r *UniversityRepository) FindByEmail(ctx context.Context, email string) (*model.University, error) {
 	university := &model.University{}
 	var publicKey sql.NullString

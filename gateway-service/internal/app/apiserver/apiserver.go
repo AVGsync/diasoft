@@ -3,10 +3,12 @@ package apiserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/diasoft/gateway-service/internal/infrastructure/qr"
 	"github.com/diasoft/gateway-service/internal/infrastructure/security"
 	"github.com/diasoft/gateway-service/internal/infrastructure/token"
+	"github.com/diasoft/gateway-service/internal/model"
 	"github.com/diasoft/gateway-service/internal/repository/postgres"
 	"github.com/diasoft/gateway-service/internal/service"
 	"github.com/diasoft/gateway-service/internal/transport/http/handler"
@@ -139,9 +142,12 @@ func (s *APIServer) configureRouter() error {
 	signingKeyService := service.NewSigningKeyService(s.db.University(), s.db.SigningKey(), keyEncryptor)
 	diplomaService := service.NewDiplomaService(s.db.Diploma(), kafkaWriter, excelGenerator)
 	studentService := service.NewStudentService(s.db.Diploma(), tokenManager, qrGenerator, s.config.PublicBaseURL, s.config.ShareTokenTTL)
-	verifyService := service.NewVerifyService(s.db.Diploma(), qrPayloadCodec)
+	universityService := service.NewUniversityCabinetService(s.db.University(), s.db.Diploma())
 
 	if err := adminService.EnsureBootstrapAdmin(context.Background(), s.config.BootstrapAdminEmail, s.config.BootstrapAdminPassword); err != nil {
+		return err
+	}
+	if err := s.ensureDemoUniversity(context.Background(), hasher, signingKeyService); err != nil {
 		return err
 	}
 
@@ -154,7 +160,7 @@ func (s *APIServer) configureRouter() error {
 	signingKeyHandler := handler.NewSigningKeyHandler(signingKeyService, validator)
 	diplomaHandler := handler.NewDiplomaHandler(diplomaService, validator)
 	studentHandler := handler.NewStudentHandler(studentService, validator)
-	verifyHandler := handler.NewVerifyHandler(verifyService)
+	universityHandler := handler.NewUniversityHandler(universityService)
 	authMiddleware := httpmw.New(tokenManager, apiKeyService, s.db.University())
 
 	s.router.Use(chimw.RequestID)
@@ -170,7 +176,6 @@ func (s *APIServer) configureRouter() error {
 	s.router.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/register", authHandler.Register())
 		r.Post("/auth/login", authHandler.Login())
-		r.Get("/verify", verifyHandler.Verify())
 
 		r.Route("/student", func(r chi.Router) {
 			r.Get("/search", studentHandler.Search())
@@ -193,6 +198,8 @@ func (s *APIServer) configureRouter() error {
 		r.Route("/vuz", func(r chi.Router) {
 			r.Use(authMiddleware.JWT)
 			r.Use(authMiddleware.University)
+			r.Get("/profile", universityHandler.Profile())
+			r.Get("/batches", universityHandler.ListBatches())
 			r.Post("/api-keys", apiKeyHandler.Create())
 			r.Get("/api-keys", apiKeyHandler.List())
 			r.Put("/signing-key", signingKeyHandler.Upsert())
@@ -207,6 +214,66 @@ func (s *APIServer) configureRouter() error {
 			r.Patch("/{diploma_hash}/revoke", diplomaHandler.Revoke())
 		})
 	})
+
+	return nil
+}
+
+func (s *APIServer) ensureDemoUniversity(ctx context.Context, hasher security.Hasher, signingKeyService *service.SigningKeyService) error {
+	values := []string{
+		s.config.DemoUniversityName,
+		s.config.DemoUniversityVUZCode,
+		s.config.DemoUniversityINN,
+		s.config.DemoUniversityOGRN,
+		s.config.DemoUniversityEmail,
+		s.config.DemoUniversityPassword,
+	}
+
+	filled := 0
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			filled++
+		}
+	}
+
+	if filled == 0 {
+		return nil
+	}
+	if filled != len(values) {
+		return errors.New("demo university configuration is incomplete")
+	}
+
+	passwordHash, err := hasher.Hash(s.config.DemoUniversityPassword)
+	if err != nil {
+		return err
+	}
+
+	university, err := s.db.University().UpsertDemo(ctx, &model.RegisterUniversityRequest{
+		Name:     s.config.DemoUniversityName,
+		VuzCode:  s.config.DemoUniversityVUZCode,
+		INN:      s.config.DemoUniversityINN,
+		OGRN:     s.config.DemoUniversityOGRN,
+		Email:    s.config.DemoUniversityEmail,
+		Password: s.config.DemoUniversityPassword,
+	}, passwordHash, model.UniversityStatusActive)
+	if err != nil {
+		return fmt.Errorf("ensure demo university: %w", err)
+	}
+
+	privateKeyPath := strings.TrimSpace(s.config.DemoUniversityPrivateKey)
+	if privateKeyPath == "" {
+		return nil
+	}
+
+	privateKeyPEM, err := os.ReadFile(privateKeyPath)
+	if err != nil {
+		return fmt.Errorf("read demo university private key: %w", err)
+	}
+
+	if _, err := signingKeyService.Upsert(ctx, university.ID, &model.UpsertSigningKeyRequest{
+		PrivateKeyPEM: string(privateKeyPEM),
+	}); err != nil {
+		return fmt.Errorf("configure demo university signing key: %w", err)
+	}
 
 	return nil
 }

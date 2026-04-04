@@ -24,7 +24,8 @@ type QRPayloadEnvelope struct {
 }
 
 type QRPayloadClaims struct {
-	FullName      string `json:"student_name"`
+	FullName      string `json:"full_name,omitempty"`
+	StudentName   string `json:"student_name,omitempty"`
 	DiplomaNumber string `json:"diploma_number"`
 	Specialty     string `json:"specialty"`
 	Degree        string `json:"degree"`
@@ -54,6 +55,8 @@ func NewQRPayloadCodec(secret string) (*QRPayloadCodec, error) {
 }
 
 func (c *QRPayloadCodec) Seal(claims QRPayloadClaims) (string, error) {
+	claims = claims.normalized()
+
 	plaintext, err := json.Marshal(claims)
 	if err != nil {
 		return "", err
@@ -109,6 +112,9 @@ func (c *QRPayloadCodec) Open(value string) (*QRPayloadClaims, error) {
 	if err := json.Unmarshal(plaintext, claims); err != nil {
 		return nil, err
 	}
+
+	normalized := claims.normalized()
+	claims = &normalized
 
 	return claims, nil
 }
@@ -226,4 +232,18 @@ func claimInt64(value interface{}) (int64, error) {
 	default:
 		return 0, errors.New("unsupported numeric value")
 	}
+}
+
+func (c QRPayloadClaims) normalized() QRPayloadClaims {
+	c.FullName = strings.TrimSpace(c.FullName)
+	c.StudentName = strings.TrimSpace(c.StudentName)
+
+	switch {
+	case c.FullName == "" && c.StudentName != "":
+		c.FullName = c.StudentName
+	case c.StudentName == "" && c.FullName != "":
+		c.StudentName = c.FullName
+	}
+
+	return c
 }

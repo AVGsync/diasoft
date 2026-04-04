@@ -1,0 +1,103 @@
+import type { Session } from "./types";
+
+const GATEWAY_BASE = "/api/v1";
+const VERIFY_BASE = "/verify-api/api/v1";
+const SESSION_KEY = "diasoft.frontend.session";
+
+type RequestBody = BodyInit | Record<string, unknown> | undefined;
+
+interface RequestOptions {
+  method?: string;
+  token?: string;
+  body?: RequestBody;
+  headers?: Record<string, string>;
+  responseType?: "json" | "blob";
+  verifyApi?: boolean;
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const {
+    method = "GET",
+    token,
+    body,
+    headers = {},
+    responseType = "json",
+    verifyApi = false,
+  } = options;
+
+  const requestHeaders: Record<string, string> = { ...headers };
+  const init: RequestInit = { method, headers: requestHeaders };
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+
+  if (token) {
+    requestHeaders.Authorization = `Bearer ${token}`;
+  }
+
+  if (body !== undefined) {
+    if (isFormData) {
+      init.body = body as FormData;
+    } else if (typeof body === "string" || body instanceof Blob) {
+      init.body = body as BodyInit;
+    } else {
+      requestHeaders["Content-Type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
+  }
+
+  const base = verifyApi ? VERIFY_BASE : GATEWAY_BASE;
+  const response = await fetch(`${base}${path}`, init);
+
+  if (!response.ok) {
+    let message = "Request failed";
+
+    try {
+      const payload = (await response.json()) as { error?: string; message?: string };
+      message = payload.error ?? payload.message ?? message;
+    } catch {
+      message = response.statusText || message;
+    }
+
+    throw new Error(message);
+  }
+
+  if (responseType === "blob") {
+    return (await response.blob()) as T;
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+export function loadSession(): Session | null {
+  const raw = window.localStorage.getItem(SESSION_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as Session;
+  } catch {
+    window.localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+}
+
+export function saveSession(session: Session) {
+  window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+export function clearSession() {
+  window.localStorage.removeItem(SESSION_KEY);
+}
+
+export function downloadBlob(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  window.URL.revokeObjectURL(url);
+}

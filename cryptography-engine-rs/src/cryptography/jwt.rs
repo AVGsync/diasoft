@@ -415,7 +415,17 @@ pub fn verify_qr_jwt(token: &str, public_key_pem: &str) -> AppResult<QrClaims> {
 
 /// Builds the verification URL for a QR code token.
 pub fn build_qr_url(token: &str, config: &crate::config::AppConfig) -> String {
-    format!("{}/{}", config.app.verification_base_url, token)
+    let base = config.app.verification_base_url.trim();
+
+    if let Some(prefix) = base.strip_suffix("{token}") {
+        return format!("{}{}", prefix, token);
+    }
+
+    if base.ends_with("payload=") {
+        return format!("{}{}", base, token);
+    }
+
+    format!("{}/{}", base.trim_end_matches('/'), token)
 }
 
 // ============================================================================
@@ -588,6 +598,8 @@ mod tests {
             "ДИП-123456".to_string(),
             "Иванов Иван Иванович".to_string(),
             "Программная инженерия".to_string(),
+            "Bachelor".to_string(),
+            "FKN".to_string(),
             2024,
             "randomsalt".to_string(),
             &key,
@@ -611,6 +623,8 @@ mod tests {
             "ДИП-123".to_string(),
             "Test Student".to_string(),
             "Computer Science".to_string(),
+            "Bachelor".to_string(),
+            "FKN".to_string(),
             2024,
             "salt123".to_string(),
             &key,
@@ -653,6 +667,8 @@ mod tests {
             "TEST-2024-001".to_string(),
             "Test Student".to_string(),
             "Computer Science".to_string(),
+            "Bachelor".to_string(),
+            "FKN".to_string(),
             2024,
             "randomsalt".to_string(),
             &key,
@@ -703,6 +719,8 @@ mod tests {
             "123".to_string(),
             "Test".to_string(),
             "CS".to_string(),
+            "Bachelor".to_string(),
+            "FKN".to_string(),
             2024,
             "salt".to_string(),
             &key,
@@ -740,6 +758,8 @@ mod tests {
             "123".to_string(),
             "Test".to_string(),
             "CS".to_string(),
+            "Bachelor".to_string(),
+            "FKN".to_string(),
             2024,
             "salt".to_string(),
             &key,
@@ -773,6 +793,8 @@ mod tests {
             "ДИП-654321".to_string(),
             "Петров Петр Петрович".to_string(),
             "Информационные технологии".to_string(),
+            "Bachelor".to_string(),
+            "IT".to_string(),
             2025,
             "mysalt".to_string(),
             &key,
@@ -839,7 +861,7 @@ mod tests {
             original_student.full_name.clone(),
             original_student.specialty.clone(),
             original_student.degree.clone(),
-            original_student.degree.clone(),
+            original_student.faculty.clone(),
             original_student.year,
             original_student.salt.clone(),
             &key,
@@ -905,6 +927,8 @@ mod tests {
                 format!("DIP-{}", i),
                 format!("Student {}", i),
                 "Test Specialty".to_string(),
+                "Bachelor".to_string(),
+                "FKN".to_string(),
                 2024,
                 format!("salt-{}", i),
                 &key,

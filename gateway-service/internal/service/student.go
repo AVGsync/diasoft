@@ -73,7 +73,7 @@ func (s *StudentService) CreateShareLink(ctx context.Context, diplomaHash string
 	}
 
 	return &model.ShareLinkResponse{
-		ShareURL:  fmt.Sprintf("%s/api/v1/student/share/%s", s.publicBaseURL, tokenValue),
+		ShareURL:  fmt.Sprintf("%s/share/%s", s.publicBaseURL, tokenValue),
 		Token:     tokenValue,
 		ExpiresAt: expiresAt,
 	}, nil

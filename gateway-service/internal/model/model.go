@@ -225,40 +225,6 @@ type ShareLinkResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-type VerificationSnapshot struct {
-	DiplomaHash    string
-	DiplomaNumber  string
-	FullName       string
-	Specialty      string
-	Degree         string
-	Faculty        string
-	Year           int
-	UniversityID   string
-	UniversityName string
-	PublicKey      *string
-	Status         string
-	CreatedAt      time.Time
-	BatchResultJWT string
-}
-
-type VerifyResponse struct {
-	Valid             bool      `json:"valid"`
-	Status            string    `json:"status,omitempty"`
-	DiplomaHash       string    `json:"diploma_hash,omitempty"`
-	DiplomaNumber     string    `json:"diploma_number,omitempty"`
-	StudentName       string    `json:"student_name,omitempty"`
-	Specialty         string    `json:"specialty,omitempty"`
-	Degree            string    `json:"degree,omitempty"`
-	Faculty           string    `json:"faculty,omitempty"`
-	Year              int       `json:"year,omitempty"`
-	UniversityID      string    `json:"university_id,omitempty"`
-	University        string    `json:"university,omitempty"`
-	HashMatches       bool      `json:"hash_matches"`
-	JWTSignatureValid bool      `json:"jwt_signature_valid"`
-	CreatedAt         time.Time `json:"created_at,omitempty"`
-	Message           string    `json:"message,omitempty"`
-}
-
 type SharedDiplomaResponse struct {
 	DiplomaHash    string    `json:"diploma_hash"`
 	DiplomaNumber  string    `json:"diploma_number"`
