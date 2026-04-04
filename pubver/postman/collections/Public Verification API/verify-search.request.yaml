@@ -1,0 +1,12 @@
+$kind: http-request
+name: Search diploma by vuz_code and diploma number
+method: GET
+url: '{{baseUrl}}/api/v1/verify/search'
+order: 3000
+queryParams:
+  - key: diploma_number
+    value: ''
+    description: ''
+  - key: vuz_code
+    value: ''
+    description: ''

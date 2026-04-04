@@ -1,0 +1,166 @@
+openapi: 3.1.0
+info:
+  title: Public Verification API
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+  /api/v1/verify:
+    get:
+      summary: Verify diploma by EdDSA-signed QR JWT with encrypted enc payload
+      parameters:
+        - in: query
+          name: payload
+          required: true
+          schema:
+            type: string
+          description: JWT from QR code with claims sub, diploma_hash, vuz_id, enc, iat and Ed25519 signature. enc is A256GCM ciphertext encoded as base64 nonce|ciphertext|tag.
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+        "400":
+          description: Invalid request
+        "429":
+          description: Rate limit exceeded
+  /api/v1/verify/search:
+    get:
+      summary: Search diploma by vuz_code and diploma number
+      parameters:
+        - in: query
+          name: diploma_number
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: vuz_code
+          required: true
+          schema:
+            type: string
+            example: 001X7276
+          description: University code from the consolidated registry, for example 001X7276.
+      responses:
+        "200":
+          description: Search result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Invalid request
+        "429":
+          description: Rate limit exceeded
+components:
+  schemas:
+    QRJWTPayload:
+      type: object
+      properties:
+        sub:
+          type: string
+        diploma_hash:
+          type: string
+        vuz_id:
+          type: string
+        enc:
+          type: string
+          description: Base64-encoded A256GCM payload in nonce|ciphertext|tag format.
+        iat:
+          type: integer
+      required: [sub, diploma_hash, vuz_id, enc, iat]
+    EncryptedDiplomaPayload:
+      type: object
+      properties:
+        full_name:
+          type: string
+        diploma_number:
+          type: string
+        specialty:
+          type: string
+        degree:
+          type: string
+        faculty:
+          type: string
+        year:
+          type: integer
+        salt:
+          type: string
+      required: [full_name, diploma_number, specialty, degree, faculty, year, salt]
+    VerifyResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          description: Overall validity. false when diploma is revoked or not found.
+        status:
+          type: string
+          enum: [active, revoked, not_found]
+        hash:
+          type: string
+        diploma_number:
+          type: string
+        university:
+          type: string
+        vuz_code:
+          type: string
+          example: 001X7276
+          description: University code from the consolidated registry.
+        year:
+          type: integer
+          nullable: true
+          description: Diploma year from registry data. The field is omitted when no linked attributes are available.
+        specialty:
+          type: string
+          nullable: true
+          description: Diploma specialty from registry data. The field is omitted when no linked attributes are available.
+        degree:
+          type: string
+          nullable: true
+          description: Diploma degree from registry data. The field is omitted when no linked attributes are available.
+        faculty:
+          type: string
+          nullable: true
+          description: Diploma faculty from registry data. The field is omitted when no linked attributes are available.
+        revoked_at:
+          type: string
+          format: date-time
+      required: [valid, status]
+    SearchResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        status:
+          type: string
+          enum: [active, revoked, not_found]
+        university:
+          type: string
+        vuz_code:
+          type: string
+          example: 001X7276
+          description: University code from the consolidated registry.
+        year:
+          type: integer
+          nullable: true
+          description: Diploma year from batch_record_attributes. The field is omitted when no linked batch attributes exist.
+        specialty:
+          type: string
+          nullable: true
+          description: Diploma specialty from batch_record_attributes. The field is omitted when no linked batch attributes exist.
+        degree:
+          type: string
+          nullable: true
+          description: Diploma degree from batch_record_attributes. The field is omitted when no linked batch attributes exist.
+        faculty:
+          type: string
+          nullable: true
+          description: Diploma faculty from batch_record_attributes. The field is omitted when no linked batch attributes exist.
+      required: [valid, status]

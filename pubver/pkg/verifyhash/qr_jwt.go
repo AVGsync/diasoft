@@ -1,0 +1,202 @@
+package verifyhash
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"strings"
+)
+
+type OuterQRClaims struct {
+	Sub         string
+	DiplomaHash string
+	VUZID       string
+	Enc         string
+	IssuedAt    int64
+}
+
+func ExtractOuterQRClaims(token string) (OuterQRClaims, error) {
+	claims, err := DecodeUnverifiedJWT(token)
+	if err != nil {
+		return OuterQRClaims{}, err
+	}
+
+	return ExtractOuterQRClaimsFromMap(claims)
+}
+
+func ExtractOuterQRClaimsFromMap(claims map[string]any) (OuterQRClaims, error) {
+	vuzID, err := ExtractVUZIDFromMap(claims)
+	if err != nil {
+		return OuterQRClaims{}, err
+	}
+
+	issuedAt, err := extractInt64Claim(claims, "iat")
+	if err != nil {
+		return OuterQRClaims{}, err
+	}
+
+	sub, err := extractStringClaim(claims, "sub")
+	if err != nil {
+		return OuterQRClaims{}, err
+	}
+	diplomaHash := optionalStringClaim(claims, "diploma_hash")
+	if diplomaHash == "" {
+		diplomaHash = sub
+	}
+	enc, err := extractStringClaim(claims, "enc")
+	if err != nil {
+		return OuterQRClaims{}, err
+	}
+
+	return OuterQRClaims{
+		Sub:         sub,
+		DiplomaHash: diplomaHash,
+		VUZID:       vuzID,
+		Enc:         enc,
+		IssuedAt:    issuedAt,
+	}, nil
+}
+
+func ExtractVUZID(token string) (string, error) {
+	claims, err := DecodeUnverifiedJWT(token)
+	if err != nil {
+		return "", err
+	}
+
+	return ExtractVUZIDFromMap(claims)
+}
+
+func ExtractVUZIDFromMap(claims map[string]any) (string, error) {
+	return extractStringClaim(claims, "vuz_id")
+}
+
+func DecodeUnverifiedJWTHeader(token string) (JWTHeader, error) {
+	parts, err := splitJWT(token)
+	if err != nil {
+		return JWTHeader{}, err
+	}
+
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return JWTHeader{}, fmt.Errorf("decode jwt header: %w", err)
+	}
+
+	var header JWTHeader
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return JWTHeader{}, fmt.Errorf("unmarshal jwt header: %w", err)
+	}
+
+	return header, nil
+}
+
+// DecodeUnverifiedJWT decodes the payload of a JWT without verifying its signature.
+func DecodeUnverifiedJWT(token string) (map[string]any, error) {
+	parts, err := splitJWT(token)
+	if err != nil {
+		return nil, err
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("decode jwt payload: %w", err)
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(string(payload)))
+	decoder.UseNumber()
+
+	var claims map[string]any
+	if err := decoder.Decode(&claims); err != nil {
+		return nil, fmt.Errorf("unmarshal jwt payload: %w", err)
+	}
+
+	return claims, nil
+}
+
+func decodeJWTForVerification(token string) (JWTHeader, string, []byte, error) {
+	parts, err := splitJWT(token)
+	if err != nil {
+		return JWTHeader{}, "", nil, err
+	}
+
+	header, err := DecodeUnverifiedJWTHeader(token)
+	if err != nil {
+		return JWTHeader{}, "", nil, err
+	}
+
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return JWTHeader{}, "", nil, fmt.Errorf("decode jwt signature: %w", err)
+	}
+
+	return header, parts[0] + "." + parts[1], signature, nil
+}
+
+func splitJWT(token string) ([3]string, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return [3]string{}, errors.New("token must have 3 segments")
+	}
+
+	return [3]string{parts[0], parts[1], parts[2]}, nil
+}
+
+func extractStringClaim(claims map[string]any, key string) (string, error) {
+	rawValue, ok := claims[key]
+	if !ok {
+		return "", fmt.Errorf("claim %q is missing", key)
+	}
+
+	value, ok := rawValue.(string)
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("claim %q must be a non-empty string", key)
+	}
+
+	return strings.TrimSpace(value), nil
+}
+
+func optionalStringClaim(claims map[string]any, key string) string {
+	rawValue, ok := claims[key]
+	if !ok {
+		return ""
+	}
+
+	value, ok := rawValue.(string)
+	if !ok {
+		return ""
+	}
+
+	return strings.TrimSpace(value)
+}
+
+func extractInt64Claim(claims map[string]any, key string) (int64, error) {
+	rawValue, ok := claims[key]
+	if !ok {
+		return 0, fmt.Errorf("claim %q is missing", key)
+	}
+
+	switch typed := rawValue.(type) {
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("claim %q must be an integer", key)
+		}
+		return parsed, nil
+	case float64:
+		if math.Trunc(typed) != typed {
+			return 0, fmt.Errorf("claim %q must be an integer", key)
+		}
+		const maxSafeJSONInteger = 1 << 53
+		if typed > maxSafeJSONInteger || typed < -maxSafeJSONInteger {
+			return 0, fmt.Errorf("claim %q exceeds safe integer range", key)
+		}
+		return int64(typed), nil
+	case int:
+		return int64(typed), nil
+	case int64:
+		return typed, nil
+	default:
+		return 0, fmt.Errorf("claim %q must be an integer", key)
+	}
+}
