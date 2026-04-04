@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/diasoft/gateway-service/internal/model"
 )
@@ -50,42 +51,95 @@ func (r *UniversityRepository) Create(ctx context.Context, request *model.Regist
 }
 
 func (r *UniversityRepository) UpsertDemo(ctx context.Context, request *model.RegisterUniversityRequest, passwordHash, status string) (*model.University, error) {
+	tx, err := r.database.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	university := &model.University{}
 	var publicKey sql.NullString
+	var existingID string
 
-	err := r.database.db.QueryRowContext(
+	err = tx.QueryRowContext(
 		ctx,
-		`INSERT INTO universities (name, vuz_code, inn, ogrn, email, password_hash, status)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 ON CONFLICT (email) DO UPDATE
-		 SET
-			name = EXCLUDED.name,
-			vuz_code = EXCLUDED.vuz_code,
-			inn = EXCLUDED.inn,
-			ogrn = EXCLUDED.ogrn,
-			password_hash = EXCLUDED.password_hash,
-			status = EXCLUDED.status
-		 RETURNING id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at`,
-		request.Name,
-		request.VuzCode,
-		request.INN,
-		request.OGRN,
+		`SELECT id
+		 FROM universities
+		 WHERE email = $1 OR vuz_code = $2
+		 ORDER BY CASE WHEN email = $1 THEN 0 ELSE 1 END
+		 LIMIT 1
+		 FOR UPDATE`,
 		request.Email,
-		passwordHash,
-		status,
-	).Scan(
-		&university.ID,
-		&university.Name,
-		&university.VuzCode,
-		&university.INN,
-		&university.OGRN,
-		&university.Email,
-		&university.PasswordHash,
-		&publicKey,
-		&university.Status,
-		&university.CreatedAt,
-	)
+		request.VuzCode,
+	).Scan(&existingID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	if errors.Is(err, sql.ErrNoRows) {
+		err = tx.QueryRowContext(
+			ctx,
+			`INSERT INTO universities (name, vuz_code, inn, ogrn, email, password_hash, status)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 RETURNING id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at`,
+			request.Name,
+			request.VuzCode,
+			request.INN,
+			request.OGRN,
+			request.Email,
+			passwordHash,
+			status,
+		).Scan(
+			&university.ID,
+			&university.Name,
+			&university.VuzCode,
+			&university.INN,
+			&university.OGRN,
+			&university.Email,
+			&university.PasswordHash,
+			&publicKey,
+			&university.Status,
+			&university.CreatedAt,
+		)
+	} else {
+		err = tx.QueryRowContext(
+			ctx,
+			`UPDATE universities
+			 SET name = $2,
+			     vuz_code = $3,
+			     inn = $4,
+			     ogrn = $5,
+			     email = $6,
+			     password_hash = $7,
+			     status = $8
+			 WHERE id = $1
+			 RETURNING id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at`,
+			existingID,
+			request.Name,
+			request.VuzCode,
+			request.INN,
+			request.OGRN,
+			request.Email,
+			passwordHash,
+			status,
+		).Scan(
+			&university.ID,
+			&university.Name,
+			&university.VuzCode,
+			&university.INN,
+			&university.OGRN,
+			&university.Email,
+			&university.PasswordHash,
+			&publicKey,
+			&university.Status,
+			&university.CreatedAt,
+		)
+	}
 	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 

@@ -152,6 +152,7 @@ func (s *APIServer) configureRouter() error {
 	if err := adminService.EnsureBootstrapAdmin(context.Background(), s.config.BootstrapAdminEmail, s.config.BootstrapAdminPassword); err != nil {
 		return err
 	}
+	s.logger.Info("bootstrap admin ensured", "email", s.config.BootstrapAdminEmail)
 	if err := s.ensureDemoUniversity(context.Background(), hasher, signingKeyService); err != nil {
 		return err
 	}
@@ -266,6 +267,7 @@ func (s *APIServer) ensureDemoUniversity(ctx context.Context, hasher security.Ha
 
 	privateKeyPath := strings.TrimSpace(s.config.DemoUniversityPrivateKey)
 	if privateKeyPath == "" {
+		s.logger.Info("demo university ensured", "email", university.Email, "vuz_code", university.VuzCode, "signing_key_configured", false)
 		return nil
 	}
 
@@ -280,5 +282,6 @@ func (s *APIServer) ensureDemoUniversity(ctx context.Context, hasher security.Ha
 		return fmt.Errorf("configure demo university signing key: %w", err)
 	}
 
+	s.logger.Info("demo university ensured", "email", university.Email, "vuz_code", university.VuzCode, "signing_key_configured", true)
 	return nil
 }
