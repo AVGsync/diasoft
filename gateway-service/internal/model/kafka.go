@@ -20,14 +20,12 @@ type DiplomaStudent struct {
 }
 
 type KafkaProcessingResult struct {
-	BatchID          string  `json:"batch_id"`
-	VUZID            string  `json:"vuz_id"`
-	RecordIndex      int     `json:"record_index"`
-	DiplomaHash      string  `json:"diploma_hash"`
-	Signature        *string `json:"signature"`
-	EncryptedPayload *string `json:"encrypted_payload"`
-	QRPayload        *string `json:"qr_payload"`
-	Status           string  `json:"status"`
-	Error            *string `json:"error"`
-	ProcessedAt      string  `json:"processed_at"`
+	BatchID     string  `json:"batch_id"`
+	VUZID       string  `json:"vuz_id"`
+	RecordIndex int     `json:"record_index"`
+	DiplomaHash string  `json:"diploma_hash"`
+	QRPayload   *string `json:"qr_payload"`
+	Status      string  `json:"status"`
+	Error       *string `json:"error"`
+	ProcessedAt string  `json:"processed_at"`
 }

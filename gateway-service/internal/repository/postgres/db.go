@@ -7,12 +7,14 @@ import (
 )
 
 type DB struct {
-	config         *Config
-	db             *sql.DB
-	universityRepo *UniversityRepository
-	adminRepo      *AdminRepository
-	apiKeyRepo     *APIKeyRepository
-	diplomaRepo    *DiplomaRepository
+	config           *Config
+	db               *sql.DB
+	universityRepo   *UniversityRepository
+	adminRepo        *AdminRepository
+	apiKeyRepo       *APIKeyRepository
+	diplomaRepo      *DiplomaRepository
+	signingKeyRepo   *SigningKeyRepository
+	qrPayloadDecoder QRPayloadDecoder
 }
 
 func New(config *Config) *DB {
@@ -72,6 +74,22 @@ func (d *DB) Diploma() *DiplomaRepository {
 		return d.diplomaRepo
 	}
 
-	d.diplomaRepo = &DiplomaRepository{database: d}
+	d.diplomaRepo = &DiplomaRepository{database: d, qrPayloadDecoder: d.qrPayloadDecoder}
 	return d.diplomaRepo
+}
+
+func (d *DB) SigningKey() *SigningKeyRepository {
+	if d.signingKeyRepo != nil {
+		return d.signingKeyRepo
+	}
+
+	d.signingKeyRepo = &SigningKeyRepository{database: d}
+	return d.signingKeyRepo
+}
+
+func (d *DB) SetQRPayloadDecoder(decoder QRPayloadDecoder) {
+	d.qrPayloadDecoder = decoder
+	if d.diplomaRepo != nil {
+		d.diplomaRepo.qrPayloadDecoder = decoder
+	}
 }

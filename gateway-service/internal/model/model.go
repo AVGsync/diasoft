@@ -23,12 +23,12 @@ const (
 )
 
 type RegisterUniversityRequest struct {
-	Name      string  `json:"name" validate:"required,min=3,max=255"`
-	INN       string  `json:"inn" validate:"required,min=10,max=12"`
-	OGRN      string  `json:"ogrn" validate:"required,min=13,max=15"`
-	Email     string  `json:"email" validate:"required,email,max=255"`
-	Password  string  `json:"password" validate:"required,min=8,max=128"`
-	PublicKey *string `json:"public_key,omitempty"`
+	Name     string `json:"name" validate:"required,min=3,max=255"`
+	VuzCode  string `json:"vuz_code" validate:"required,alphanum,len=8"`
+	INN      string `json:"inn" validate:"required,min=10,max=12"`
+	OGRN     string `json:"ogrn" validate:"required,min=13,max=15"`
+	Email    string `json:"email" validate:"required,email,max=255"`
+	Password string `json:"password" validate:"required,min=8,max=128"`
 }
 
 type RegisterUniversityResponse struct {
@@ -55,6 +55,7 @@ type AuthResponse struct {
 type University struct {
 	ID           string
 	Name         string
+	VuzCode      string
 	INN          string
 	OGRN         string
 	Email        string
@@ -62,6 +63,32 @@ type University struct {
 	PublicKey    *string
 	Status       string
 	CreatedAt    time.Time
+}
+
+type UpdateUniversityStatusRequest struct {
+	Status string `json:"status" validate:"required,oneof=pending active blocked"`
+}
+
+type UniversityAdminResponse struct {
+	ID           string    `json:"id"`
+	VuzCode      string    `json:"vuz_code"`
+	Name         string    `json:"name"`
+	INN          string    `json:"inn"`
+	OGRN         string    `json:"ogrn"`
+	Email        string    `json:"email"`
+	Status       string    `json:"status"`
+	HasPublicKey bool      `json:"has_public_key"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type UniversitySigningKey struct {
+	VUZID                string
+	EncryptedPrivateKey  string
+	KeyAlgorithm         string
+	EncryptionAlgorithm  string
+	PublicKeyFingerprint string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type PlatformAdmin struct {
@@ -91,11 +118,23 @@ type CreateAPIKeyRequest struct {
 	Name *string `json:"name,omitempty" validate:"omitempty,min=3,max=100"`
 }
 
+type UpsertSigningKeyRequest struct {
+	PrivateKeyPEM string `json:"private_key_pem" validate:"required,min=32"`
+}
+
 type CreateAPIKeyResponse struct {
 	ID        string    `json:"id"`
 	Name      *string   `json:"name,omitempty"`
 	APIKey    string    `json:"api_key"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type SigningKeyStatusResponse struct {
+	Configured           bool      `json:"configured"`
+	KeyAlgorithm         string    `json:"key_algorithm"`
+	EncryptionAlgorithm  string    `json:"encryption_algorithm"`
+	PublicKeyFingerprint string    `json:"public_key_fingerprint"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 type Batch struct {
@@ -198,28 +237,26 @@ type VerificationSnapshot struct {
 	UniversityName string
 	PublicKey      *string
 	Status         string
-	Signature      *string
 	CreatedAt      time.Time
 	BatchResultJWT string
 }
 
 type VerifyResponse struct {
-	Valid              bool      `json:"valid"`
-	Status             string    `json:"status,omitempty"`
-	DiplomaHash        string    `json:"diploma_hash,omitempty"`
-	DiplomaNumber      string    `json:"diploma_number,omitempty"`
-	StudentName        string    `json:"student_name,omitempty"`
-	Specialty          string    `json:"specialty,omitempty"`
-	Degree             string    `json:"degree,omitempty"`
-	Faculty            string    `json:"faculty,omitempty"`
-	Year               int       `json:"year,omitempty"`
-	UniversityID       string    `json:"university_id,omitempty"`
-	University         string    `json:"university,omitempty"`
-	HashMatches        bool      `json:"hash_matches"`
-	JWTSignatureValid  bool      `json:"jwt_signature_valid"`
-	HashSignatureValid bool      `json:"hash_signature_valid"`
-	CreatedAt          time.Time `json:"created_at,omitempty"`
-	Message            string    `json:"message,omitempty"`
+	Valid             bool      `json:"valid"`
+	Status            string    `json:"status,omitempty"`
+	DiplomaHash       string    `json:"diploma_hash,omitempty"`
+	DiplomaNumber     string    `json:"diploma_number,omitempty"`
+	StudentName       string    `json:"student_name,omitempty"`
+	Specialty         string    `json:"specialty,omitempty"`
+	Degree            string    `json:"degree,omitempty"`
+	Faculty           string    `json:"faculty,omitempty"`
+	Year              int       `json:"year,omitempty"`
+	UniversityID      string    `json:"university_id,omitempty"`
+	University        string    `json:"university,omitempty"`
+	HashMatches       bool      `json:"hash_matches"`
+	JWTSignatureValid bool      `json:"jwt_signature_valid"`
+	CreatedAt         time.Time `json:"created_at,omitempty"`
+	Message           string    `json:"message,omitempty"`
 }
 
 type SharedDiplomaResponse struct {

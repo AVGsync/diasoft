@@ -11,4 +11,7 @@ var (
 	ErrDiplomaNotFound    = errors.New("diploma not found")
 	ErrShareLinkExpired   = errors.New("share link expired")
 	ErrInvalidShareToken  = errors.New("invalid share token")
+	ErrInvalidSigningKey  = errors.New("invalid Ed25519 private key")
+	ErrSigningKeyMismatch = errors.New("private key does not match university public key")
+	ErrSigningKeyNotFound = errors.New("signing key is not configured")
 )

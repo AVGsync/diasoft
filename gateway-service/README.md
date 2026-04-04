@@ -1,5 +1,8 @@
 # Gateway Service
 
+> Update: `batch_records` is deprecated and removed by migration `009_remove_batch_records`.
+> The service now keeps per-record processing state in `batch_results` and reads student data from `qr_payload`, so plaintext student data is no longer stored in PostgreSQL.
+
 `gateway-service` это точка входа для ВУЗов и платформенный gateway для пакетной загрузки дипломов.
 
 Сервис реализует:

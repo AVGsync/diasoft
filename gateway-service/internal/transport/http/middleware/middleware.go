@@ -19,15 +19,21 @@ type APIKeyResolver interface {
 	ResolveActiveUniversity(ctx context.Context, plainKey string) (*model.University, *model.APIKey, error)
 }
 
-type Middleware struct {
-	tokens  AccessTokenParser
-	apiKeys APIKeyResolver
+type UniversityResolver interface {
+	FindByID(ctx context.Context, id string) (*model.University, error)
 }
 
-func New(tokens AccessTokenParser, apiKeys APIKeyResolver) *Middleware {
+type Middleware struct {
+	tokens       AccessTokenParser
+	apiKeys      APIKeyResolver
+	universities UniversityResolver
+}
+
+func New(tokens AccessTokenParser, apiKeys APIKeyResolver, universities UniversityResolver) *Middleware {
 	return &Middleware{
-		tokens:  tokens,
-		apiKeys: apiKeys,
+		tokens:       tokens,
+		apiKeys:      apiKeys,
+		universities: universities,
 	}
 }
 
@@ -58,6 +64,9 @@ func (m *Middleware) JWT(next http.Handler) http.Handler {
 			universityID := claims.VUZID
 			if universityID == "" {
 				universityID = claims.Subject
+			}
+			if !m.ensureUniversityIsActive(w, r, universityID) {
+				return
 			}
 
 			ctx := authctx.WithUniversity(r.Context(), universityID, claims.Email)
@@ -98,6 +107,9 @@ func (m *Middleware) UniversityOrAPIKey(next http.Handler) http.Handler {
 				universityID := claims.VUZID
 				if universityID == "" {
 					universityID = claims.Subject
+				}
+				if !m.ensureUniversityIsActive(w, r, universityID) {
+					return
 				}
 
 				ctx := authctx.WithUniversity(r.Context(), universityID, claims.Email)
@@ -159,4 +171,28 @@ func extractAPIKey(r *http.Request) string {
 	}
 
 	return parts[1]
+}
+
+func (m *Middleware) ensureUniversityIsActive(w http.ResponseWriter, r *http.Request, universityID string) bool {
+	if m.universities == nil {
+		return true
+	}
+
+	university, err := m.universities.FindByID(r.Context(), universityID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "university not found", http.StatusUnauthorized)
+			return false
+		}
+
+		http.Error(w, "failed to resolve university", http.StatusInternalServerError)
+		return false
+	}
+
+	if university.Status != model.UniversityStatusActive {
+		http.Error(w, "university account is not active", http.StatusForbidden)
+		return false
+	}
+
+	return true
 }

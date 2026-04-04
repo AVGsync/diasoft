@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_university_signing_keys_public_key_fingerprint;
+DROP TABLE IF EXISTS university_signing_keys;

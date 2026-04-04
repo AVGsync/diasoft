@@ -3,7 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -11,17 +11,19 @@ import (
 )
 
 type DiplomaRepository struct {
-	database *DB
+	database         *DB
+	qrPayloadDecoder QRPayloadDecoder
 }
 
 func (r *DiplomaRepository) CreateBatchWithRecords(ctx context.Context, vuzID string, records []model.DiplomaUploadRecord) (*model.Batch, error) {
+	batch := &model.Batch{}
+
 	tx, err := r.database.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	batch := &model.Batch{}
 	err = tx.QueryRowContext(
 		ctx,
 		`INSERT INTO batches (vuz_id, status, total_records, processed_records)
@@ -43,20 +45,16 @@ func (r *DiplomaRepository) CreateBatchWithRecords(ctx context.Context, vuzID st
 	}
 
 	for index, record := range records {
-		_, err := tx.ExecContext(
+		_, err = tx.ExecContext(
 			ctx,
-			`INSERT INTO batch_records
-			 (batch_id, record_index, full_name, diploma_number, specialty, degree, faculty, year, raw_csv_row)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			`INSERT INTO batch_record_attributes (batch_id, record_index, specialty, degree, faculty, year)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
 			batch.ID,
 			index,
-			record.FullName,
-			record.DiplomaNumber,
 			record.Specialty,
 			record.Degree,
 			record.Faculty,
 			record.Year,
-			record.RawCSVRow,
 		)
 		if err != nil {
 			return nil, err
@@ -91,7 +89,7 @@ func (r *DiplomaRepository) GetBatch(ctx context.Context, batchID, vuzID string)
 			b.status,
 			b.total_records,
 			b.processed_records,
-			COALESCE((SELECT COUNT(*) FROM batch_records br WHERE br.batch_id = b.id AND br.status = 'error'), 0),
+			COALESCE((SELECT COUNT(*) FROM batch_results br WHERE br.batch_id = b.id AND br.status = 'error'), 0),
 			b.created_at,
 			b.completed_at
 		 FROM batches b
@@ -119,27 +117,23 @@ func (r *DiplomaRepository) GetBatchDownloadRows(ctx context.Context, batchID, v
 	rows, err := r.database.db.QueryContext(
 		ctx,
 		`SELECT
-			br.record_index,
-			COALESCE(result.diploma_hash, ''),
-			br.full_name,
-			br.diploma_number,
-			br.specialty,
-			br.degree,
-			br.faculty,
-			br.year,
-			COALESCE(result.qr_payload, ''),
-			COALESCE(dh.status, br.status),
-			br.error
-		 FROM batch_records br
-		 JOIN batches b ON b.id = br.batch_id
-		 LEFT JOIN batch_results result
-		   ON result.batch_id = br.batch_id
-		  AND result.record_index = br.record_index
-		 LEFT JOIN diploma_hashes dh
-		   ON dh.hash = result.diploma_hash
-		 WHERE br.batch_id = $1
+			result.record_index,
+			result.diploma_hash,
+			result.qr_payload,
+			result.status,
+			result.error,
+			dh.status,
+			meta.specialty,
+			meta.degree,
+			meta.faculty,
+			meta.year
+		 FROM batch_results result
+		 JOIN batches b ON b.id = result.batch_id
+		 LEFT JOIN diploma_hashes dh ON dh.hash = result.diploma_hash
+		 LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
+		 WHERE result.batch_id = $1
 		   AND b.vuz_id = $2
-		 ORDER BY br.record_index`,
+		 ORDER BY result.record_index`,
 		batchID,
 		vuzID,
 	)
@@ -151,26 +145,72 @@ func (r *DiplomaRepository) GetBatchDownloadRows(ctx context.Context, batchID, v
 	result := make([]*model.BatchDownloadRow, 0)
 	for rows.Next() {
 		item := &model.BatchDownloadRow{}
-		var nullableError sql.NullString
+		var (
+			diplomaHash   sql.NullString
+			qrPayload     sql.NullString
+			rowStatus     string
+			rowError      sql.NullString
+			diplomaStatus sql.NullString
+			metaSpecialty sql.NullString
+			metaDegree    sql.NullString
+			metaFaculty   sql.NullString
+			metaYear      sql.NullInt64
+		)
 
 		if err := rows.Scan(
 			&item.RecordIndex,
-			&item.DiplomaHash,
-			&item.FullName,
-			&item.DiplomaNumber,
-			&item.Specialty,
-			&item.Degree,
-			&item.Faculty,
-			&item.Year,
-			&item.QRPayload,
-			&item.Status,
-			&nullableError,
+			&diplomaHash,
+			&qrPayload,
+			&rowStatus,
+			&rowError,
+			&diplomaStatus,
+			&metaSpecialty,
+			&metaDegree,
+			&metaFaculty,
+			&metaYear,
 		); err != nil {
 			return nil, err
 		}
 
-		if nullableError.Valid {
-			item.Error = &nullableError.String
+		if diplomaHash.Valid {
+			item.DiplomaHash = diplomaHash.String
+		}
+		if rowError.Valid {
+			item.Error = &rowError.String
+		}
+
+		item.Status = rowStatus
+		if rowStatus != model.RecordStatusError && diplomaStatus.Valid {
+			item.Status = diplomaStatus.String
+		}
+		if metaSpecialty.Valid {
+			item.Specialty = metaSpecialty.String
+		}
+		if metaDegree.Valid {
+			item.Degree = metaDegree.String
+		}
+		if metaFaculty.Valid {
+			item.Faculty = metaFaculty.String
+		}
+		if metaYear.Valid {
+			item.Year = int(metaYear.Int64)
+		}
+
+		if qrPayload.Valid && strings.TrimSpace(qrPayload.String) != "" {
+			payload, err := parseQRPayload(r.qrPayloadDecoder, qrPayload.String)
+			if err != nil {
+				return nil, err
+			}
+
+			item.FullName = payload.FullName
+			item.DiplomaNumber = payload.DiplomaNumber
+			item.Specialty = firstNonEmpty(payload.Specialty, item.Specialty)
+			item.Degree = firstNonEmpty(payload.Degree, item.Degree)
+			item.Faculty = firstNonEmpty(payload.Faculty, item.Faculty)
+			if payload.Year != 0 {
+				item.Year = payload.Year
+			}
+			item.QRPayload = qrPayload.String
 		}
 
 		result = append(result, item)
@@ -204,36 +244,94 @@ func (r *DiplomaRepository) MarkDiplomaRevoked(ctx context.Context, vuzID, hash 
 }
 
 func (r *DiplomaRepository) ApplyProcessingResult(ctx context.Context, result *model.KafkaProcessingResult) error {
+	slog.Info(
+		"starting processing result transaction",
+		"batch_id", result.BatchID,
+		"record_index", result.RecordIndex,
+		"vuz_id", result.VUZID,
+		"status", result.Status,
+	)
+
 	tx, err := r.database.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	var (
-		diplomaNumber string
-		recordStatus  string
-	)
-
+	var existingStatus string
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT diploma_number, status
-		 FROM batch_records
+		`SELECT status
+		 FROM batch_results
 		 WHERE batch_id = $1 AND record_index = $2
 		 FOR UPDATE`,
 		result.BatchID,
 		result.RecordIndex,
-	).Scan(&diplomaNumber, &recordStatus)
-	if err != nil {
+	).Scan(&existingStatus)
+	switch {
+	case err == nil:
+		slog.Warn(
+			"skipping kafka result because batch result already exists",
+			"batch_id", result.BatchID,
+			"record_index", result.RecordIndex,
+			"existing_status", existingStatus,
+		)
+		return tx.Commit()
+	case err != sql.ErrNoRows:
 		return err
 	}
 
-	if recordStatus != model.RecordStatusPending {
+	if result.Status != "ok" || result.QRPayload == nil || strings.TrimSpace(result.DiplomaHash) == "" {
+		slog.Warn(
+			"storing batch result as error because kafka result is incomplete",
+			"batch_id", result.BatchID,
+			"record_index", result.RecordIndex,
+			"status", result.Status,
+			"has_qr_payload", result.QRPayload != nil,
+			"has_diploma_hash", strings.TrimSpace(result.DiplomaHash) != "",
+			"error", stringOrDefault(result.Error, "processing error"),
+		)
+		if err := r.insertBatchResultErrorTx(ctx, tx, result.BatchID, result.RecordIndex, stringOrDefault(result.Error, "processing error")); err != nil {
+			return err
+		}
+		if err := r.incrementBatchProcessedTx(ctx, tx, result.BatchID); err != nil {
+			return err
+		}
+		if err := r.finalizeBatchIfCompleteTx(ctx, tx, result.BatchID); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 
-	if result.Status != "ok" || result.EncryptedPayload == nil || result.QRPayload == nil || strings.TrimSpace(result.DiplomaHash) == "" {
-		if err := r.markBatchRecordErrorTx(ctx, tx, result.BatchID, result.RecordIndex, stringOrDefault(result.Error, "processing error")); err != nil {
+	qrData, err := parseQRPayload(r.qrPayloadDecoder, *result.QRPayload)
+	if err != nil || strings.TrimSpace(qrData.DiplomaNumber) == "" {
+		slog.Warn(
+			"storing batch result as error because qr payload is invalid",
+			"batch_id", result.BatchID,
+			"record_index", result.RecordIndex,
+			"parse_error", err,
+		)
+		if err := r.insertBatchResultErrorTx(ctx, tx, result.BatchID, result.RecordIndex, "qr payload does not contain diploma number"); err != nil {
+			return err
+		}
+		if err := r.incrementBatchProcessedTx(ctx, tx, result.BatchID); err != nil {
+			return err
+		}
+		if err := r.finalizeBatchIfCompleteTx(ctx, tx, result.BatchID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	if strings.TrimSpace(qrData.VUZID) != "" && qrData.VUZID != result.VUZID {
+		slog.Warn(
+			"storing batch result as error because qr payload university does not match",
+			"batch_id", result.BatchID,
+			"record_index", result.RecordIndex,
+			"result_vuz_id", result.VUZID,
+			"qr_vuz_id", qrData.VUZID,
+		)
+		if err := r.insertBatchResultErrorTx(ctx, tx, result.BatchID, result.RecordIndex, "qr payload university mismatch"); err != nil {
 			return err
 		}
 		if err := r.incrementBatchProcessedTx(ctx, tx, result.BatchID); err != nil {
@@ -252,25 +350,39 @@ func (r *DiplomaRepository) ApplyProcessingResult(ctx context.Context, result *m
 		 FROM diploma_hashes
 		 WHERE vuz_id = $1 AND diploma_number = $2`,
 		result.VUZID,
-		diplomaNumber,
+		qrData.DiplomaNumber,
 	).Scan(&existingHash)
 
 	switch {
 	case existingErr == sql.ErrNoRows:
 		_, err = tx.ExecContext(
 			ctx,
-			`INSERT INTO diploma_hashes (hash, vuz_id, diploma_number, status, signature)
-			 VALUES ($1, $2, $3, 'active', $4)`,
+			`INSERT INTO diploma_hashes (hash, vuz_id, diploma_number, status)
+			 VALUES ($1, $2, $3, 'active')`,
 			result.DiplomaHash,
 			result.VUZID,
-			diplomaNumber,
-			result.Signature,
+			qrData.DiplomaNumber,
 		)
 		if err != nil {
 			return err
 		}
+		slog.Info(
+			"inserted diploma hash",
+			"batch_id", result.BatchID,
+			"record_index", result.RecordIndex,
+			"diploma_hash", result.DiplomaHash,
+			"diploma_number", qrData.DiplomaNumber,
+		)
 	case existingErr == nil && existingHash != result.DiplomaHash:
-		if err := r.markBatchRecordErrorTx(ctx, tx, result.BatchID, result.RecordIndex, "diploma number already exists"); err != nil {
+		slog.Warn(
+			"storing batch result as error because diploma number already exists with another hash",
+			"batch_id", result.BatchID,
+			"record_index", result.RecordIndex,
+			"diploma_number", qrData.DiplomaNumber,
+			"existing_hash", existingHash,
+			"incoming_hash", result.DiplomaHash,
+		)
+		if err := r.insertBatchResultErrorTx(ctx, tx, result.BatchID, result.RecordIndex, "diploma number already exists"); err != nil {
 			return err
 		}
 		if err := r.incrementBatchProcessedTx(ctx, tx, result.BatchID); err != nil {
@@ -286,34 +398,22 @@ func (r *DiplomaRepository) ApplyProcessingResult(ctx context.Context, result *m
 
 	_, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO batch_results (batch_id, record_index, diploma_hash, encrypted_payload, qr_payload)
-		 VALUES ($1, $2, $3, $4, $5)
-		 ON CONFLICT (batch_id, record_index)
-		 DO UPDATE SET
-			diploma_hash = EXCLUDED.diploma_hash,
-			encrypted_payload = EXCLUDED.encrypted_payload,
-			qr_payload = EXCLUDED.qr_payload`,
+		`INSERT INTO batch_results (batch_id, record_index, diploma_hash, qr_payload, status, error)
+		 VALUES ($1, $2, $3, $4, 'ok', NULL)`,
 		result.BatchID,
 		result.RecordIndex,
 		result.DiplomaHash,
-		*result.EncryptedPayload,
 		*result.QRPayload,
 	)
 	if err != nil {
 		return err
 	}
-
-	_, err = tx.ExecContext(
-		ctx,
-		`UPDATE batch_records
-		 SET status = 'processed', error = NULL
-		 WHERE batch_id = $1 AND record_index = $2`,
-		result.BatchID,
-		result.RecordIndex,
+	slog.Info(
+		"inserted batch result",
+		"batch_id", result.BatchID,
+		"record_index", result.RecordIndex,
+		"diploma_hash", result.DiplomaHash,
 	)
-	if err != nil {
-		return err
-	}
 
 	if err := r.incrementBatchProcessedTx(ctx, tx, result.BatchID); err != nil {
 		return err
@@ -322,64 +422,68 @@ func (r *DiplomaRepository) ApplyProcessingResult(ctx context.Context, result *m
 		return err
 	}
 
+	slog.Info(
+		"finished processing result transaction",
+		"batch_id", result.BatchID,
+		"record_index", result.RecordIndex,
+		"diploma_hash", result.DiplomaHash,
+	)
+
 	return tx.Commit()
 }
 
 func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, fullName string) ([]*model.StudentSearchResult, error) {
-	var (
-		builder strings.Builder
-		args    []interface{}
-	)
-
-	builder.WriteString(
-		`SELECT
+	query := `
+		SELECT
 			dh.hash,
-			br.diploma_number,
-			br.full_name,
-			br.specialty,
-			br.degree,
-			br.faculty,
-			br.year,
+			result.qr_payload,
+			meta.specialty,
+			meta.degree,
+			meta.faculty,
+			meta.year,
 			u.id,
 			u.name,
 			dh.status,
 			dh.created_at
-		 FROM diploma_hashes dh
-		 JOIN batch_results result ON result.diploma_hash = dh.hash
-		 JOIN batch_records br ON br.batch_id = result.batch_id AND br.record_index = result.record_index
-		 JOIN universities u ON u.id = dh.vuz_id
-		 WHERE 1 = 1`,
-	)
+		FROM diploma_hashes dh
+		JOIN batch_results result ON result.diploma_hash = dh.hash
+		LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
+		JOIN universities u ON u.id = dh.vuz_id
+		WHERE result.status = 'ok'`
 
-	if diplomaNumber != "" {
+	args := make([]interface{}, 0, 1)
+	if strings.TrimSpace(diplomaNumber) != "" {
 		args = append(args, diplomaNumber)
-		builder.WriteString(fmt.Sprintf(" AND br.diploma_number = $%d", len(args)))
+		query += ` AND dh.diploma_number = $1`
 	}
+	query += ` ORDER BY dh.created_at DESC`
 
-	if fullName != "" {
-		args = append(args, "%"+strings.ToLower(fullName)+"%")
-		builder.WriteString(fmt.Sprintf(" AND lower(br.full_name) LIKE $%d", len(args)))
-	}
-
-	builder.WriteString(" ORDER BY dh.created_at DESC LIMIT 50")
-
-	rows, err := r.database.db.QueryContext(ctx, builder.String(), args...)
+	rows, err := r.database.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	normalizedName := strings.ToLower(strings.TrimSpace(fullName))
 	result := make([]*model.StudentSearchResult, 0)
+
 	for rows.Next() {
 		item := &model.StudentSearchResult{}
+		var (
+			qrPayload     string
+			metaSpecialty sql.NullString
+			metaDegree    sql.NullString
+			metaFaculty   sql.NullString
+			metaYear      sql.NullInt64
+		)
+
 		if err := rows.Scan(
 			&item.DiplomaHash,
-			&item.DiplomaNumber,
-			&item.FullName,
-			&item.Specialty,
-			&item.Degree,
-			&item.Faculty,
-			&item.Year,
+			&qrPayload,
+			&metaSpecialty,
+			&metaDegree,
+			&metaFaculty,
+			&metaYear,
 			&item.UniversityID,
 			&item.UniversityName,
 			&item.Status,
@@ -388,7 +492,26 @@ func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, f
 			return nil, err
 		}
 
+		payload, err := parseQRPayload(r.qrPayloadDecoder, qrPayload)
+		if err != nil {
+			return nil, err
+		}
+
+		if normalizedName != "" && !strings.Contains(strings.ToLower(payload.FullName), normalizedName) {
+			continue
+		}
+
+		item.DiplomaNumber = payload.DiplomaNumber
+		item.FullName = payload.FullName
+		item.Specialty = firstNonEmpty(payload.Specialty, nullStringValue(metaSpecialty))
+		item.Degree = firstNonEmpty(payload.Degree, nullStringValue(metaDegree))
+		item.Faculty = firstNonEmpty(payload.Faculty, nullStringValue(metaFaculty))
+		item.Year = firstNonZero(payload.Year, nullIntValue(metaYear))
+
 		result = append(result, item)
+		if len(result) >= 50 {
+			break
+		}
 	}
 
 	return result, rows.Err()
@@ -396,35 +519,42 @@ func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, f
 
 func (r *DiplomaRepository) FindStudentByHash(ctx context.Context, diplomaHash string) (*model.StudentSearchResult, error) {
 	item := &model.StudentSearchResult{}
+	var (
+		qrPayload     string
+		metaSpecialty sql.NullString
+		metaDegree    sql.NullString
+		metaFaculty   sql.NullString
+		metaYear      sql.NullInt64
+	)
+
 	err := r.database.db.QueryRowContext(
 		ctx,
 		`SELECT
 			dh.hash,
-			br.diploma_number,
-			br.full_name,
-			br.specialty,
-			br.degree,
-			br.faculty,
-			br.year,
+			result.qr_payload,
+			meta.specialty,
+			meta.degree,
+			meta.faculty,
+			meta.year,
 			u.id,
 			u.name,
 			dh.status,
 			dh.created_at
 		 FROM diploma_hashes dh
 		 JOIN batch_results result ON result.diploma_hash = dh.hash
-		 JOIN batch_records br ON br.batch_id = result.batch_id AND br.record_index = result.record_index
+		 LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
 		 JOIN universities u ON u.id = dh.vuz_id
 		 WHERE dh.hash = $1
+		   AND result.status = 'ok'
 		 LIMIT 1`,
 		diplomaHash,
 	).Scan(
 		&item.DiplomaHash,
-		&item.DiplomaNumber,
-		&item.FullName,
-		&item.Specialty,
-		&item.Degree,
-		&item.Faculty,
-		&item.Year,
+		&qrPayload,
+		&metaSpecialty,
+		&metaDegree,
+		&metaFaculty,
+		&metaYear,
 		&item.UniversityID,
 		&item.UniversityName,
 		&item.Status,
@@ -433,6 +563,18 @@ func (r *DiplomaRepository) FindStudentByHash(ctx context.Context, diplomaHash s
 	if err != nil {
 		return nil, err
 	}
+
+	payload, err := parseQRPayload(r.qrPayloadDecoder, qrPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	item.DiplomaNumber = payload.DiplomaNumber
+	item.FullName = payload.FullName
+	item.Specialty = firstNonEmpty(payload.Specialty, nullStringValue(metaSpecialty))
+	item.Degree = firstNonEmpty(payload.Degree, nullStringValue(metaDegree))
+	item.Faculty = firstNonEmpty(payload.Faculty, nullStringValue(metaFaculty))
+	item.Year = firstNonZero(payload.Year, nullIntValue(metaYear))
 
 	return item, nil
 }
@@ -485,69 +627,85 @@ func (r *DiplomaRepository) IncrementShareLinkUsage(ctx context.Context, token s
 
 func (r *DiplomaRepository) GetVerificationSnapshot(ctx context.Context, diplomaHash string) (*model.VerificationSnapshot, error) {
 	item := &model.VerificationSnapshot{}
-	var publicKey sql.NullString
-	var signature sql.NullString
+	var (
+		publicKey     sql.NullString
+		diplomaNo     string
+		qrPayload     string
+		metaSpecialty sql.NullString
+		metaDegree    sql.NullString
+		metaFaculty   sql.NullString
+		metaYear      sql.NullInt64
+	)
 
 	err := r.database.db.QueryRowContext(
 		ctx,
 		`SELECT
 			dh.hash,
 			dh.diploma_number,
-			br.full_name,
-			br.specialty,
-			br.degree,
-			br.faculty,
-			br.year,
+			result.qr_payload,
+			meta.specialty,
+			meta.degree,
+			meta.faculty,
+			meta.year,
 			u.id,
 			u.name,
 			u.public_key,
 			dh.status,
-			dh.signature,
-			dh.created_at,
-			result.qr_payload
+			dh.created_at
 		 FROM diploma_hashes dh
 		 JOIN universities u ON u.id = dh.vuz_id
 		 JOIN batch_results result ON result.diploma_hash = dh.hash
-		 JOIN batch_records br ON br.batch_id = result.batch_id AND br.record_index = result.record_index
+		 LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
 		 WHERE dh.hash = $1
+		   AND result.status = 'ok'
 		 LIMIT 1`,
 		diplomaHash,
 	).Scan(
 		&item.DiplomaHash,
-		&item.DiplomaNumber,
-		&item.FullName,
-		&item.Specialty,
-		&item.Degree,
-		&item.Faculty,
-		&item.Year,
+		&diplomaNo,
+		&qrPayload,
+		&metaSpecialty,
+		&metaDegree,
+		&metaFaculty,
+		&metaYear,
 		&item.UniversityID,
 		&item.UniversityName,
 		&publicKey,
 		&item.Status,
-		&signature,
 		&item.CreatedAt,
-		&item.BatchResultJWT,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	payload, err := parseQRPayload(r.qrPayloadDecoder, qrPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	item.DiplomaNumber = diplomaNo
+	if strings.TrimSpace(payload.DiplomaNumber) != "" {
+		item.DiplomaNumber = payload.DiplomaNumber
+	}
+	item.FullName = payload.FullName
+	item.Specialty = firstNonEmpty(payload.Specialty, nullStringValue(metaSpecialty))
+	item.Degree = firstNonEmpty(payload.Degree, nullStringValue(metaDegree))
+	item.Faculty = firstNonEmpty(payload.Faculty, nullStringValue(metaFaculty))
+	item.Year = firstNonZero(payload.Year, nullIntValue(metaYear))
+	item.BatchResultJWT = qrPayload
+
 	if publicKey.Valid {
 		item.PublicKey = &publicKey.String
-	}
-	if signature.Valid {
-		item.Signature = &signature.String
 	}
 
 	return item, nil
 }
 
-func (r *DiplomaRepository) markBatchRecordErrorTx(ctx context.Context, tx *sql.Tx, batchID string, recordIndex int, message string) error {
+func (r *DiplomaRepository) insertBatchResultErrorTx(ctx context.Context, tx *sql.Tx, batchID string, recordIndex int, message string) error {
 	_, err := tx.ExecContext(
 		ctx,
-		`UPDATE batch_records
-		 SET status = 'error', error = $3
-		 WHERE batch_id = $1 AND record_index = $2`,
+		`INSERT INTO batch_results (batch_id, record_index, diploma_hash, qr_payload, status, error)
+		 VALUES ($1, $2, NULL, NULL, 'error', $3)`,
 		batchID,
 		recordIndex,
 		message,
@@ -578,7 +736,7 @@ func (r *DiplomaRepository) finalizeBatchIfCompleteTx(ctx context.Context, tx *s
 		`SELECT
 			total_records,
 			processed_records,
-			(SELECT COUNT(*) FROM batch_records WHERE batch_id = $1 AND status = 'error')
+			(SELECT COUNT(*) FROM batch_results WHERE batch_id = $1 AND status = 'error')
 		 FROM batches
 		 WHERE id = $1`,
 		batchID,
@@ -618,4 +776,27 @@ func stringOrDefault(value *string, defaultValue string) string {
 	}
 
 	return trimmed
+}
+
+func nullStringValue(value sql.NullString) string {
+	if value.Valid {
+		return value.String
+	}
+	return ""
+}
+
+func nullIntValue(value sql.NullInt64) int {
+	if value.Valid {
+		return int(value.Int64)
+	}
+	return 0
+}
+
+func firstNonZero(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }

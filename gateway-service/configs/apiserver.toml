@@ -3,13 +3,15 @@ log_level = "debug"
 public_base_url = "http://localhost:8080"
 jwt_secret = "gateway-access-secret"
 share_jwt_secret = "gateway-share-secret"
+signing_keys_master_key = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+qr_payload_encryption_secret = "XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI="
 access_token_ttl = "24h"
 share_token_ttl = "72h"
 bootstrap_admin_email = "admin@platform.local"
 bootstrap_admin_password = "admin12345"
 
 [db]
-database_url = "postgres://gateway_user:gateway_password@localhost:5432/gateway_service?sslmode=disable"
+database_url = "postgres://gateway_user:gateway_password@localhost:5432/postgres?sslmode=disable"
 
 [kafka]
 brokers = ["localhost:9092"]

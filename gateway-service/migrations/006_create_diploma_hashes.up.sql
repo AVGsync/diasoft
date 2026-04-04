@@ -1,10 +1,9 @@
 CREATE TABLE diploma_hashes (
     hash           VARCHAR(64) PRIMARY KEY,
     vuz_id         UUID NOT NULL REFERENCES universities(id),
-    diploma_number VARCHAR(50) NOT NULL,
+    diploma_number VARCHAR(50),
     status         VARCHAR(20) NOT NULL DEFAULT 'active'
                    CHECK (status IN ('active', 'revoked')),
-    signature      TEXT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     revoked_at     TIMESTAMPTZ,
 

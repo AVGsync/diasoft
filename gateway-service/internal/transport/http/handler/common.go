@@ -18,3 +18,9 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, errorResponse{Error: message})
 }
+
+func decodeJSON(r *http.Request, target interface{}) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}

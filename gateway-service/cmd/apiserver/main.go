@@ -42,6 +42,9 @@ func applyEnvOverrides(config *apiserver.Config) {
 	if value := os.Getenv("SHARE_JWT_SECRET"); value != "" {
 		config.ShareJWTSecret = value
 	}
+	if value := os.Getenv("SIGNING_KEYS_MASTER_KEY"); value != "" {
+		config.SigningKeysMasterKey = value
+	}
 	if value := os.Getenv("PUBLIC_BASE_URL"); value != "" {
 		config.PublicBaseURL = value
 	}

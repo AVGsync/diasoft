@@ -17,18 +17,19 @@ func (r *UniversityRepository) Create(ctx context.Context, request *model.Regist
 
 	err := r.database.db.QueryRowContext(
 		ctx,
-		`INSERT INTO universities (name, inn, ogrn, email, password_hash, public_key)
+		`INSERT INTO universities (name, vuz_code, inn, ogrn, email, password_hash)
 		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, name, inn, ogrn, email, password_hash, public_key, status, created_at`,
+		 RETURNING id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at`,
 		request.Name,
+		request.VuzCode,
 		request.INN,
 		request.OGRN,
 		request.Email,
 		passwordHash,
-		request.PublicKey,
 	).Scan(
 		&university.ID,
 		&university.Name,
+		&university.VuzCode,
 		&university.INN,
 		&university.OGRN,
 		&university.Email,
@@ -54,13 +55,14 @@ func (r *UniversityRepository) FindByEmail(ctx context.Context, email string) (*
 
 	err := r.database.db.QueryRowContext(
 		ctx,
-		`SELECT id, name, inn, ogrn, email, password_hash, public_key, status, created_at
+		`SELECT id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at
 		 FROM universities
 		 WHERE email = $1`,
 		email,
 	).Scan(
 		&university.ID,
 		&university.Name,
+		&university.VuzCode,
 		&university.INN,
 		&university.OGRN,
 		&university.Email,
@@ -86,13 +88,14 @@ func (r *UniversityRepository) FindByID(ctx context.Context, id string) (*model.
 
 	err := r.database.db.QueryRowContext(
 		ctx,
-		`SELECT id, name, inn, ogrn, email, password_hash, public_key, status, created_at
+		`SELECT id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at
 		 FROM universities
 		 WHERE id = $1`,
 		id,
 	).Scan(
 		&university.ID,
 		&university.Name,
+		&university.VuzCode,
 		&university.INN,
 		&university.OGRN,
 		&university.Email,
@@ -112,20 +115,68 @@ func (r *UniversityRepository) FindByID(ctx context.Context, id string) (*model.
 	return university, nil
 }
 
+func (r *UniversityRepository) List(ctx context.Context) ([]*model.University, error) {
+	rows, err := r.database.db.QueryContext(
+		ctx,
+		`SELECT id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at
+		 FROM universities
+		 ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]*model.University, 0)
+	for rows.Next() {
+		item := &model.University{}
+		var publicKey sql.NullString
+
+		if err := rows.Scan(
+			&item.ID,
+			&item.Name,
+			&item.VuzCode,
+			&item.INN,
+			&item.OGRN,
+			&item.Email,
+			&item.PasswordHash,
+			&publicKey,
+			&item.Status,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		if publicKey.Valid {
+			item.PublicKey = &publicKey.String
+		}
+
+		result = append(result, item)
+	}
+
+	return result, rows.Err()
+}
+
 func (r *UniversityRepository) Activate(ctx context.Context, id string) (*model.University, error) {
+	return r.UpdateStatus(ctx, id, model.UniversityStatusActive)
+}
+
+func (r *UniversityRepository) UpdateStatus(ctx context.Context, id, status string) (*model.University, error) {
 	university := &model.University{}
 	var publicKey sql.NullString
 
 	err := r.database.db.QueryRowContext(
 		ctx,
 		`UPDATE universities
-		 SET status = 'active'
+		 SET status = $2
 		 WHERE id = $1
-		 RETURNING id, name, inn, ogrn, email, password_hash, public_key, status, created_at`,
+		 RETURNING id, name, vuz_code, inn, ogrn, email, password_hash, public_key, status, created_at`,
 		id,
+		status,
 	).Scan(
 		&university.ID,
 		&university.Name,
+		&university.VuzCode,
 		&university.INN,
 		&university.OGRN,
 		&university.Email,
@@ -143,4 +194,77 @@ func (r *UniversityRepository) Activate(ctx context.Context, id string) (*model.
 	}
 
 	return university, nil
+}
+
+func (r *UniversityRepository) DeleteCascade(ctx context.Context, id string) error {
+	tx, err := r.database.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var exists string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM universities WHERE id = $1`, id).Scan(&exists); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM share_links
+		 WHERE diploma_hash IN (
+		 	SELECT hash
+		 	FROM diploma_hashes
+		 	WHERE vuz_id = $1
+		 )`,
+		id,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM batches WHERE vuz_id = $1`, id); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM diploma_hashes WHERE vuz_id = $1`, id); err != nil {
+		return err
+	}
+
+	result, err := tx.ExecContext(ctx, `DELETE FROM universities WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return tx.Commit()
+}
+
+func (r *UniversityRepository) UpdatePublicKey(ctx context.Context, id, publicKey string) error {
+	result, err := r.database.db.ExecContext(
+		ctx,
+		`UPDATE universities
+		 SET public_key = $2
+		 WHERE id = $1`,
+		id,
+		publicKey,
+	)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }

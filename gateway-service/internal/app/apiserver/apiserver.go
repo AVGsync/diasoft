@@ -119,6 +119,15 @@ func (s *APIServer) configureDB() error {
 func (s *APIServer) configureRouter() error {
 	validator := security.NewValidator()
 	hasher := security.NewBcryptHasher()
+	keyEncryptor, err := security.NewKeyEncryptor(s.config.SigningKeysMasterKey)
+	if err != nil {
+		return err
+	}
+	qrPayloadCodec, err := security.NewQRPayloadCodec(s.config.QRPayloadEncryptionSecret)
+	if err != nil {
+		return err
+	}
+	s.db.SetQRPayloadDecoder(qrPayloadCodec)
 	tokenManager := token.NewManager(s.config.JWTSecret, s.config.ShareJWTSecret, s.config.AccessTokenTTL, s.config.ShareTokenTTL)
 	qrGenerator := qr.NewGenerator()
 	excelGenerator := excel.NewGenerator(qrGenerator, s.config.PublicBaseURL)
@@ -127,9 +136,10 @@ func (s *APIServer) configureRouter() error {
 	authService := service.NewAuthService(s.db.University(), s.db.Admin(), hasher, tokenManager)
 	adminService := service.NewAdminService(s.db.Admin(), s.db.University(), hasher)
 	apiKeyService := service.NewAPIKeyService(s.db.APIKey())
+	signingKeyService := service.NewSigningKeyService(s.db.University(), s.db.SigningKey(), keyEncryptor)
 	diplomaService := service.NewDiplomaService(s.db.Diploma(), kafkaWriter, excelGenerator)
 	studentService := service.NewStudentService(s.db.Diploma(), tokenManager, qrGenerator, s.config.PublicBaseURL, s.config.ShareTokenTTL)
-	verifyService := service.NewVerifyService(s.db.Diploma())
+	verifyService := service.NewVerifyService(s.db.Diploma(), qrPayloadCodec)
 
 	if err := adminService.EnsureBootstrapAdmin(context.Background(), s.config.BootstrapAdminEmail, s.config.BootstrapAdminPassword); err != nil {
 		return err
@@ -141,10 +151,11 @@ func (s *APIServer) configureRouter() error {
 	authHandler := handler.NewAuthHandler(authService, validator)
 	adminHandler := handler.NewAdminHandler(adminService)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService, validator)
+	signingKeyHandler := handler.NewSigningKeyHandler(signingKeyService, validator)
 	diplomaHandler := handler.NewDiplomaHandler(diplomaService, validator)
 	studentHandler := handler.NewStudentHandler(studentService, validator)
 	verifyHandler := handler.NewVerifyHandler(verifyService)
-	authMiddleware := httpmw.New(tokenManager, apiKeyService)
+	authMiddleware := httpmw.New(tokenManager, apiKeyService, s.db.University())
 
 	s.router.Use(chimw.RequestID)
 	s.router.Use(chimw.RealIP)
@@ -171,7 +182,11 @@ func (s *APIServer) configureRouter() error {
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(authMiddleware.JWT)
 			r.Use(authMiddleware.Admin)
+			r.Get("/universities", adminHandler.ListUniversities())
+			r.Get("/universities/{id}", adminHandler.GetUniversity())
 			r.Post("/universities/{id}/approve", adminHandler.ApproveUniversity())
+			r.Patch("/universities/{id}", adminHandler.UpdateUniversityStatus())
+			r.Delete("/universities/{id}", adminHandler.DeleteUniversity())
 			r.Get("/stats", adminHandler.Stats())
 		})
 
@@ -180,6 +195,8 @@ func (s *APIServer) configureRouter() error {
 			r.Use(authMiddleware.University)
 			r.Post("/api-keys", apiKeyHandler.Create())
 			r.Get("/api-keys", apiKeyHandler.List())
+			r.Put("/signing-key", signingKeyHandler.Upsert())
+			r.Get("/signing-key", signingKeyHandler.Status())
 		})
 
 		r.Route("/diplomas", func(r chi.Router) {
