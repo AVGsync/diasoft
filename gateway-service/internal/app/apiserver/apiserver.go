@@ -131,6 +131,11 @@ func (s *APIServer) configureRouter() error {
 		return err
 	}
 	s.db.SetQRPayloadDecoder(qrPayloadCodec)
+	recordPayloadCipher, err := security.NewKeyEncryptor(s.config.QRPayloadEncryptionSecret)
+	if err != nil {
+		return err
+	}
+	s.db.SetRecordPayloadCipher(recordPayloadCipher)
 	tokenManager := token.NewManager(s.config.JWTSecret, s.config.ShareJWTSecret, s.config.AccessTokenTTL, s.config.ShareTokenTTL)
 	qrGenerator := qr.NewGenerator()
 	excelGenerator := excel.NewGenerator(qrGenerator, s.config.PublicBaseURL)

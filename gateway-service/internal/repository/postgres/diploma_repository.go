@@ -11,8 +11,9 @@ import (
 )
 
 type DiplomaRepository struct {
-	database         *DB
-	qrPayloadDecoder QRPayloadDecoder
+	database            *DB
+	qrPayloadDecoder    QRPayloadDecoder
+	recordPayloadCipher RecordPayloadCipher
 }
 
 func (r *DiplomaRepository) CreateBatchWithRecords(ctx context.Context, vuzID string, records []model.DiplomaUploadRecord) (*model.Batch, error) {
@@ -45,16 +46,18 @@ func (r *DiplomaRepository) CreateBatchWithRecords(ctx context.Context, vuzID st
 	}
 
 	for index, record := range records {
+		encryptedPayload, err := encodeBatchRecordPayload(r.recordPayloadCipher, record)
+		if err != nil {
+			return nil, err
+		}
+
 		_, err = tx.ExecContext(
 			ctx,
-			`INSERT INTO batch_record_attributes (batch_id, record_index, specialty, degree, faculty, year)
-			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			`INSERT INTO batch_record_payloads (batch_id, record_index, encrypted_payload)
+			 VALUES ($1, $2, $3)`,
 			batch.ID,
 			index,
-			record.Specialty,
-			record.Degree,
-			record.Faculty,
-			record.Year,
+			encryptedPayload,
 		)
 		if err != nil {
 			return nil, err
@@ -173,14 +176,11 @@ func (r *DiplomaRepository) GetBatchDownloadRows(ctx context.Context, batchID, v
 			result.status,
 			result.error,
 			dh.status,
-			meta.specialty,
-			meta.degree,
-			meta.faculty,
-			meta.year
+			payloads.encrypted_payload
 		 FROM batch_results result
 		 JOIN batches b ON b.id = result.batch_id
 		 LEFT JOIN diploma_hashes dh ON dh.hash = result.diploma_hash
-		 LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
+		 LEFT JOIN batch_record_payloads payloads ON payloads.batch_id = result.batch_id AND payloads.record_index = result.record_index
 		 WHERE result.batch_id = $1
 		   AND b.vuz_id = $2
 		 ORDER BY result.record_index`,
@@ -196,15 +196,12 @@ func (r *DiplomaRepository) GetBatchDownloadRows(ctx context.Context, batchID, v
 	for rows.Next() {
 		item := &model.BatchDownloadRow{}
 		var (
-			diplomaHash   sql.NullString
-			qrPayload     sql.NullString
-			rowStatus     string
-			rowError      sql.NullString
-			diplomaStatus sql.NullString
-			metaSpecialty sql.NullString
-			metaDegree    sql.NullString
-			metaFaculty   sql.NullString
-			metaYear      sql.NullInt64
+			diplomaHash      sql.NullString
+			qrPayload        sql.NullString
+			rowStatus        string
+			rowError         sql.NullString
+			diplomaStatus    sql.NullString
+			encryptedPayload sql.NullString
 		)
 
 		if err := rows.Scan(
@@ -214,10 +211,7 @@ func (r *DiplomaRepository) GetBatchDownloadRows(ctx context.Context, batchID, v
 			&rowStatus,
 			&rowError,
 			&diplomaStatus,
-			&metaSpecialty,
-			&metaDegree,
-			&metaFaculty,
-			&metaYear,
+			&encryptedPayload,
 		); err != nil {
 			return nil, err
 		}
@@ -233,34 +227,38 @@ func (r *DiplomaRepository) GetBatchDownloadRows(ctx context.Context, batchID, v
 		if rowStatus != model.RecordStatusError && diplomaStatus.Valid {
 			item.Status = diplomaStatus.String
 		}
-		if metaSpecialty.Valid {
-			item.Specialty = metaSpecialty.String
-		}
-		if metaDegree.Valid {
-			item.Degree = metaDegree.String
-		}
-		if metaFaculty.Valid {
-			item.Faculty = metaFaculty.String
-		}
-		if metaYear.Valid {
-			item.Year = int(metaYear.Int64)
-		}
 
-		if qrPayload.Valid && strings.TrimSpace(qrPayload.String) != "" {
-			payload, err := parseQRPayload(r.qrPayloadDecoder, qrPayload.String)
+		if encryptedPayload.Valid {
+			payload, err := decodeBatchRecordPayload(r.recordPayloadCipher, encryptedPayload.String)
 			if err != nil {
 				return nil, err
 			}
-
-			item.FullName = payload.FullName
-			item.DiplomaNumber = payload.DiplomaNumber
-			item.Specialty = firstNonEmpty(payload.Specialty, item.Specialty)
-			item.Degree = firstNonEmpty(payload.Degree, item.Degree)
-			item.Faculty = firstNonEmpty(payload.Faculty, item.Faculty)
-			if payload.Year != 0 {
+			if payload != nil {
+				item.FullName = payload.FullName
+				item.DiplomaNumber = payload.DiplomaNumber
+				item.Specialty = payload.Specialty
+				item.Degree = payload.Degree
+				item.Faculty = payload.Faculty
 				item.Year = payload.Year
 			}
+		}
+
+		if qrPayload.Valid && strings.TrimSpace(qrPayload.String) != "" {
 			item.QRPayload = qrPayload.String
+
+			if item.FullName == "" || item.DiplomaNumber == "" || item.Specialty == "" || item.Degree == "" || item.Faculty == "" || item.Year == 0 {
+				payload, err := parseQRPayload(r.qrPayloadDecoder, qrPayload.String)
+				if err != nil {
+					return nil, err
+				}
+
+				item.FullName = firstNonEmpty(item.FullName, payload.FullName)
+				item.DiplomaNumber = firstNonEmpty(item.DiplomaNumber, payload.DiplomaNumber)
+				item.Specialty = firstNonEmpty(item.Specialty, payload.Specialty)
+				item.Degree = firstNonEmpty(item.Degree, payload.Degree)
+				item.Faculty = firstNonEmpty(item.Faculty, payload.Faculty)
+				item.Year = firstNonZero(item.Year, payload.Year)
+			}
 		}
 
 		result = append(result, item)
@@ -487,10 +485,6 @@ func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, f
 		SELECT
 			dh.hash,
 			result.qr_payload,
-			meta.specialty,
-			meta.degree,
-			meta.faculty,
-			meta.year,
 			u.id,
 			u.name,
 			dh.status,
@@ -504,7 +498,6 @@ func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, f
 			ORDER BY created_at DESC
 			LIMIT 1
 		) result ON TRUE
-		LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
 		JOIN universities u ON u.id = dh.vuz_id
 		WHERE 1 = 1`
 
@@ -527,20 +520,12 @@ func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, f
 	for rows.Next() {
 		item := &model.StudentSearchResult{}
 		var (
-			qrPayload     string
-			metaSpecialty sql.NullString
-			metaDegree    sql.NullString
-			metaFaculty   sql.NullString
-			metaYear      sql.NullInt64
+			qrPayload string
 		)
 
 		if err := rows.Scan(
 			&item.DiplomaHash,
 			&qrPayload,
-			&metaSpecialty,
-			&metaDegree,
-			&metaFaculty,
-			&metaYear,
 			&item.UniversityID,
 			&item.UniversityName,
 			&item.Status,
@@ -560,10 +545,10 @@ func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, f
 
 		item.DiplomaNumber = payload.DiplomaNumber
 		item.FullName = payload.FullName
-		item.Specialty = firstNonEmpty(payload.Specialty, nullStringValue(metaSpecialty))
-		item.Degree = firstNonEmpty(payload.Degree, nullStringValue(metaDegree))
-		item.Faculty = firstNonEmpty(payload.Faculty, nullStringValue(metaFaculty))
-		item.Year = firstNonZero(payload.Year, nullIntValue(metaYear))
+		item.Specialty = payload.Specialty
+		item.Degree = payload.Degree
+		item.Faculty = payload.Faculty
+		item.Year = payload.Year
 
 		result = append(result, item)
 		if len(result) >= 50 {
@@ -577,11 +562,7 @@ func (r *DiplomaRepository) SearchStudents(ctx context.Context, diplomaNumber, f
 func (r *DiplomaRepository) FindStudentByHash(ctx context.Context, diplomaHash string) (*model.StudentSearchResult, error) {
 	item := &model.StudentSearchResult{}
 	var (
-		qrPayload     string
-		metaSpecialty sql.NullString
-		metaDegree    sql.NullString
-		metaFaculty   sql.NullString
-		metaYear      sql.NullInt64
+		qrPayload string
 	)
 
 	err := r.database.db.QueryRowContext(
@@ -589,10 +570,6 @@ func (r *DiplomaRepository) FindStudentByHash(ctx context.Context, diplomaHash s
 		`SELECT
 			dh.hash,
 			result.qr_payload,
-			meta.specialty,
-			meta.degree,
-			meta.faculty,
-			meta.year,
 			u.id,
 			u.name,
 			dh.status,
@@ -606,7 +583,6 @@ func (r *DiplomaRepository) FindStudentByHash(ctx context.Context, diplomaHash s
 		 	ORDER BY created_at DESC
 		 	LIMIT 1
 		 ) result ON TRUE
-		 LEFT JOIN batch_record_attributes meta ON meta.batch_id = result.batch_id AND meta.record_index = result.record_index
 		 JOIN universities u ON u.id = dh.vuz_id
 		 WHERE dh.hash = $1
 		 LIMIT 1`,
@@ -614,10 +590,6 @@ func (r *DiplomaRepository) FindStudentByHash(ctx context.Context, diplomaHash s
 	).Scan(
 		&item.DiplomaHash,
 		&qrPayload,
-		&metaSpecialty,
-		&metaDegree,
-		&metaFaculty,
-		&metaYear,
 		&item.UniversityID,
 		&item.UniversityName,
 		&item.Status,
@@ -634,10 +606,10 @@ func (r *DiplomaRepository) FindStudentByHash(ctx context.Context, diplomaHash s
 
 	item.DiplomaNumber = payload.DiplomaNumber
 	item.FullName = payload.FullName
-	item.Specialty = firstNonEmpty(payload.Specialty, nullStringValue(metaSpecialty))
-	item.Degree = firstNonEmpty(payload.Degree, nullStringValue(metaDegree))
-	item.Faculty = firstNonEmpty(payload.Faculty, nullStringValue(metaFaculty))
-	item.Year = firstNonZero(payload.Year, nullIntValue(metaYear))
+	item.Specialty = payload.Specialty
+	item.Degree = payload.Degree
+	item.Faculty = payload.Faculty
+	item.Year = payload.Year
 
 	return item, nil
 }
@@ -763,20 +735,6 @@ func stringOrDefault(value *string, defaultValue string) string {
 	}
 
 	return trimmed
-}
-
-func nullStringValue(value sql.NullString) string {
-	if value.Valid {
-		return value.String
-	}
-	return ""
-}
-
-func nullIntValue(value sql.NullInt64) int {
-	if value.Valid {
-		return int(value.Int64)
-	}
-	return 0
 }
 
 func firstNonZero(values ...int) int {

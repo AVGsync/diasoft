@@ -104,6 +104,7 @@ func (s *VerificationService) VerifyPayload(ctx context.Context, token string) (
 		return domain.VerifyResponse{}, err
 	}
 
+	applyEncryptedPayload(record, diplomaPayload)
 	return toVerifyResponse(record), nil
 }
 
@@ -127,6 +128,11 @@ func (s *VerificationService) Search(ctx context.Context, vuzCode, diplomaNumber
 		return domain.SearchResponse{}, err
 	}
 
+	if err := s.enrichRecordFromStoredQR(record); err != nil {
+		s.logger.Error("enrich diploma metadata from stored qr", "vuz_code", vuzCode, "diploma_number", diplomaNumber, "error", err)
+		return domain.SearchResponse{}, err
+	}
+
 	return domain.SearchResponse{
 		Valid:      record.Status == domain.DiplomaStatusActive,
 		Status:     record.Status,
@@ -137,6 +143,54 @@ func (s *VerificationService) Search(ctx context.Context, vuzCode, diplomaNumber
 		Degree:     record.Degree,
 		Faculty:    record.Faculty,
 	}, nil
+}
+
+func (s *VerificationService) enrichRecordFromStoredQR(record *domain.DiplomaRecord) error {
+	if record == nil || record.QRPayload == nil || strings.TrimSpace(*record.QRPayload) == "" {
+		return nil
+	}
+	if record.GraduateYear != nil && record.Specialty != nil && record.Degree != nil && record.Faculty != nil {
+		return nil
+	}
+
+	outerClaims, err := verifyhash.ExtractOuterQRClaims(*record.QRPayload)
+	if err != nil {
+		return err
+	}
+
+	payload, err := verifyhash.DecryptEncryptedDiplomaPayload(outerClaims.Enc, s.encKey)
+	if err != nil {
+		return err
+	}
+
+	applyEncryptedPayload(record, payload)
+	return nil
+}
+
+func applyEncryptedPayload(record *domain.DiplomaRecord, payload verifyhash.EncryptedDiplomaPayload) {
+	if record == nil {
+		return
+	}
+
+	if strings.TrimSpace(record.DiplomaNumber) == "" {
+		record.DiplomaNumber = payload.DiplomaNumber
+	}
+	if record.GraduateYear == nil && payload.Year != 0 {
+		year := payload.Year
+		record.GraduateYear = &year
+	}
+	if record.Specialty == nil && strings.TrimSpace(payload.Specialty) != "" {
+		value := payload.Specialty
+		record.Specialty = &value
+	}
+	if record.Degree == nil && strings.TrimSpace(payload.Degree) != "" {
+		value := payload.Degree
+		record.Degree = &value
+	}
+	if record.Faculty == nil && strings.TrimSpace(payload.Faculty) != "" {
+		value := payload.Faculty
+		record.Faculty = &value
+	}
 }
 
 func toVerifyResponse(record *domain.DiplomaRecord) domain.VerifyResponse {

@@ -19,6 +19,7 @@ type DiplomaRecord struct {
 	Specialty     *string
 	Degree        *string
 	Faculty       *string
+	QRPayload     *string
 	RevokedAt     *time.Time
 }
 

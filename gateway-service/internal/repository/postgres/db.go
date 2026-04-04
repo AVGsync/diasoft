@@ -15,6 +15,7 @@ type DB struct {
 	diplomaRepo      *DiplomaRepository
 	signingKeyRepo   *SigningKeyRepository
 	qrPayloadDecoder QRPayloadDecoder
+	recordCipher     RecordPayloadCipher
 }
 
 func New(config *Config) *DB {
@@ -74,7 +75,11 @@ func (d *DB) Diploma() *DiplomaRepository {
 		return d.diplomaRepo
 	}
 
-	d.diplomaRepo = &DiplomaRepository{database: d, qrPayloadDecoder: d.qrPayloadDecoder}
+	d.diplomaRepo = &DiplomaRepository{
+		database:            d,
+		qrPayloadDecoder:    d.qrPayloadDecoder,
+		recordPayloadCipher: d.recordCipher,
+	}
 	return d.diplomaRepo
 }
 
@@ -91,5 +96,12 @@ func (d *DB) SetQRPayloadDecoder(decoder QRPayloadDecoder) {
 	d.qrPayloadDecoder = decoder
 	if d.diplomaRepo != nil {
 		d.diplomaRepo.qrPayloadDecoder = decoder
+	}
+}
+
+func (d *DB) SetRecordPayloadCipher(cipher RecordPayloadCipher) {
+	d.recordCipher = cipher
+	if d.diplomaRepo != nil {
+		d.diplomaRepo.recordPayloadCipher = cipher
 	}
 }

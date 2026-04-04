@@ -17,12 +17,9 @@ type KeyEncryptor struct {
 }
 
 func NewKeyEncryptor(base64Key string) (*KeyEncryptor, error) {
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(base64Key))
+	decoded, err := deriveAES256Key(base64Key)
 	if err != nil {
-		return nil, errors.New("signing key master key must be base64")
-	}
-	if len(decoded) != 32 {
-		return nil, errors.New("signing key master key must be 32 bytes after base64 decode")
+		return nil, err
 	}
 
 	return &KeyEncryptor{key: decoded}, nil

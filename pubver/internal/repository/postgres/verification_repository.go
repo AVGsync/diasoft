@@ -19,22 +19,17 @@ SELECT
     dh.revoked_at,
     u.vuz_code,
     u.name,
-    bra.year,
-    bra.specialty,
-    bra.degree,
-    bra.faculty
+    latest_br.qr_payload
 FROM diploma_hashes dh
 JOIN universities u ON u.id = dh.vuz_id
 LEFT JOIN LATERAL (
-    SELECT br.batch_id, br.record_index
+    SELECT br.qr_payload
     FROM batch_results br
     WHERE br.diploma_hash = dh.hash
+      AND br.status = 'ok'
     ORDER BY br.created_at DESC
     LIMIT 1
 ) latest_br ON true
-LEFT JOIN batch_record_attributes bra
-    ON bra.batch_id = latest_br.batch_id
-   AND bra.record_index = latest_br.record_index
 `
 
 type VerificationRepository struct {
@@ -86,10 +81,7 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 	var revokedAt sql.NullTime
 	var universityCode sql.NullString
 	var universityName sql.NullString
-	var specialty sql.NullString
-	var graduateYear sql.NullInt64
-	var degree sql.NullString
-	var faculty sql.NullString
+	var qrPayload sql.NullString
 
 	err := r.pool.QueryRow(ctx, query, args...).Scan(
 		&record.Hash,
@@ -98,10 +90,7 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 		&revokedAt,
 		&universityCode,
 		&universityName,
-		&graduateYear,
-		&specialty,
-		&degree,
-		&faculty,
+		&qrPayload,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -118,21 +107,9 @@ func (r *VerificationRepository) fetchOne(ctx context.Context, query string, arg
 	if revokedAt.Valid {
 		record.RevokedAt = &revokedAt.Time
 	}
-	if graduateYear.Valid {
-		year := int(graduateYear.Int64)
-		record.GraduateYear = &year
-	}
-	if specialty.Valid {
-		value := specialty.String
-		record.Specialty = &value
-	}
-	if degree.Valid {
-		value := degree.String
-		record.Degree = &value
-	}
-	if faculty.Valid {
-		value := faculty.String
-		record.Faculty = &value
+	if qrPayload.Valid {
+		value := qrPayload.String
+		record.QRPayload = &value
 	}
 
 	return &record, nil
