@@ -17,6 +17,8 @@ type DiplomaRecord struct {
 	University    University
 	GraduateYear  *int
 	Specialty     *string
+	Degree        *string
+	Faculty       *string
 	RevokedAt     *time.Time
 }
 
@@ -38,6 +40,8 @@ type VerifyResponse struct {
 	VUZCode       string        `json:"vuz_code,omitempty"`
 	Year          *int          `json:"year"`
 	Specialty     *string       `json:"specialty"`
+	Degree        *string       `json:"degree"`
+	Faculty       *string       `json:"faculty"`
 	RevokedAt     *time.Time    `json:"revoked_at,omitempty"`
 }
 
@@ -48,4 +52,6 @@ type SearchResponse struct {
 	VUZCode    string        `json:"vuz_code,omitempty"`
 	Year       *int          `json:"year"`
 	Specialty  *string       `json:"specialty"`
+	Degree     *string       `json:"degree"`
+	Faculty    *string       `json:"faculty"`
 }

@@ -20,7 +20,7 @@ paths:
           required: true
           schema:
             type: string
-          description: JWT from QR code with flat diploma claims and Ed25519 signature
+          description: JWT from QR code with flat claims sub, diploma_hash, vuz_id, diploma_number, student_name, specialty, degree, faculty, year, salt, iat and Ed25519 signature
       responses:
         "200":
           description: Verification result
@@ -57,6 +57,32 @@ paths:
           description: Invalid request
 components:
   schemas:
+    QRJWTPayload:
+      type: object
+      properties:
+        sub:
+          type: string
+        diploma_hash:
+          type: string
+        vuz_id:
+          type: string
+        diploma_number:
+          type: string
+        student_name:
+          type: string
+        specialty:
+          type: string
+        degree:
+          type: string
+        faculty:
+          type: string
+        year:
+          type: integer
+        salt:
+          type: string
+        iat:
+          type: integer
+      required: [sub, diploma_hash, vuz_id, diploma_number, student_name, specialty, degree, faculty, year, salt, iat]
     VerifyResponse:
       type: object
       properties:
@@ -79,11 +105,19 @@ components:
         year:
           type: integer
           nullable: true
-          description: Reserved response field. Currently returned as null until DB storage is finalized.
+          description: Diploma year from batch_record_attributes. Returned as null only when no linked batch attributes exist.
         specialty:
           type: string
           nullable: true
-          description: Reserved response field. Currently returned as null until DB storage is finalized.
+          description: Diploma specialty from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+        degree:
+          type: string
+          nullable: true
+          description: Diploma degree. For /verify it is taken from the verified JWT payload, for /search from batch_record_attributes when available.
+        faculty:
+          type: string
+          nullable: true
+          description: Diploma faculty. For /verify it is taken from the verified JWT payload, for /search from batch_record_attributes when available.
         revoked_at:
           type: string
           format: date-time
@@ -105,9 +139,17 @@ components:
         year:
           type: integer
           nullable: true
-          description: Reserved response field. Currently returned as null until DB storage is finalized.
+          description: Diploma year from batch_record_attributes. Returned as null only when no linked batch attributes exist.
         specialty:
           type: string
           nullable: true
-          description: Reserved response field. Currently returned as null until DB storage is finalized.
+          description: Diploma specialty from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+        degree:
+          type: string
+          nullable: true
+          description: Diploma degree from batch_record_attributes. Returned as null only when no linked batch attributes exist.
+        faculty:
+          type: string
+          nullable: true
+          description: Diploma faculty from batch_record_attributes. Returned as null only when no linked batch attributes exist.
       required: [valid, status]

@@ -14,21 +14,23 @@
 - проверяет `EdDSA` подпись QR JWT
 - пересчитывает хеш и сверяет его с реестром
 
+Сервис работает только через реальную `PostgreSQL`.
+
 ## Поток `GET /api/v1/verify`
 
 1. Клиент открывает ссылку `/api/v1/verify?payload=<jwt>`.
 2. Сервис извлекает `vuz_id` из payload без доверия к данным.
 3. По `vuz_id` находит `universities.public_key`.
 4. Проверяет `EdDSA` подпись JWT через `Ed25519`.
-5. Из валидного payload читает `student_name`, `diploma_number`, `specialty`, `degree`, `faculty`, `year`, `vuz_id`, `salt`.
+5. Из валидного payload читает `sub`, `diploma_hash`, `vuz_id`, `diploma_number`, `student_name`, `specialty`, `degree`, `faculty`, `year`, `salt`, `iat`.
 6. Собирает строку:
 
 ```text
-full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
+student_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
 ```
 
 7. Считает `SHA-256`.
-8. Сверяет результат с `sub` и `diploma_hash`, если они есть.
+8. Сверяет результат с обязательными `sub` и `diploma_hash`.
 9. Ищет хеш в `diploma_hashes`.
 10. Возвращает `active`, `revoked` или `not_found`.
 
@@ -55,7 +57,7 @@ full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
 - не добавлять в БД временную схему
 - подключить реальные данные позже без смены ответа
 
-`degree` и `faculty` тоже приходят в QR JWT, валидируются на этапе разбора claims и участвуют в формуле хеша, но пока не отдаются наружу публичным API.
+`degree` и `faculty` приходят в QR JWT, валидируются на этапе разбора claims и участвуют в формуле хеша, но пока не отдаются наружу публичным API.
 
 ## Почему нужен `vuz_code`
 
@@ -100,7 +102,6 @@ full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
 - [`router.go`](/d:/diasoft/pubver/internal/httpapi/router.go) - HTTP endpoints
 - [`verification_service.go`](/d:/diasoft/pubver/internal/service/verification_service.go) - бизнес-логика
 - [`verification_repository.go`](/d:/diasoft/pubver/internal/repository/postgres/verification_repository.go) - SQL к PostgreSQL
-- [`verification_repository.go`](/d:/diasoft/pubver/internal/repository/stub/verification_repository.go) - stub-репозиторий без БД
 - [`hash.go`](/d:/diasoft/pubver/pkg/verifyhash/hash.go) - хеширование
 - [`qr_jwt.go`](/d:/diasoft/pubver/pkg/verifyhash/qr_jwt.go) - разбор QR JWT
 - [`ed25519.go`](/d:/diasoft/pubver/pkg/verifyhash/ed25519.go) - проверка `Ed25519`

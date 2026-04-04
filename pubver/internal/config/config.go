@@ -16,7 +16,6 @@ type Config struct {
 	RequestTimeout time.Duration
 	LogLevel       string
 	DBMaxConns     int32
-	UseStubData    bool
 }
 
 func Load() (Config, error) {
@@ -25,7 +24,6 @@ func Load() (Config, error) {
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		LogLevel:    envOrDefault("LOG_LEVEL", "info"),
 		DBMaxConns:  int32(envIntOrDefault("DB_MAX_CONNS", 10)),
-		UseStubData: envBoolOrDefault("USE_STUB_DATA", false),
 	}
 
 	requestTimeout, err := time.ParseDuration(envOrDefault("REQUEST_TIMEOUT", "5s"))
@@ -34,11 +32,9 @@ func Load() (Config, error) {
 	}
 	cfg.RequestTimeout = requestTimeout
 
-	if !cfg.UseStubData {
-		cfg.DatabaseURL, err = loadDatabaseURL()
-		if err != nil {
-			return Config{}, err
-		}
+	cfg.DatabaseURL, err = loadDatabaseURL()
+	if err != nil {
+		return Config{}, err
 	}
 
 	return cfg, nil
@@ -91,20 +87,6 @@ func envIntOrDefault(key string, fallback int) int {
 	}
 
 	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return fallback
-	}
-
-	return parsed
-}
-
-func envBoolOrDefault(key string, fallback bool) bool {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return fallback
 	}

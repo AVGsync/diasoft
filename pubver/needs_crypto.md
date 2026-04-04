@@ -24,17 +24,12 @@
 5. Пересчитывает:
 
 ```text
-SHA-256(full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)
+SHA-256(student_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)
 ```
 
-6. Сверяет результат с `sub` и `diploma_hash`, если они есть.
+6. Сверяет результат с обязательными `sub` и `diploma_hash`.
 7. Ищет пересчитанный хеш в `diploma_hashes`.
 8. Возвращает `active`, `revoked` или `not_found`.
-
-Из этого следует, что `Crypto Service` обязан выпустить JWT и хеш так, чтобы оба шага проверки совпали:
-
-- криптографическая подпись JWT
-- пересчитанный хеш диплома
 
 ## Что обязательно должен делать `Crypto Service`
 
@@ -47,18 +42,12 @@ SHA-256(full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)
 - `salt` должен быть непустой строкой
 - `salt` должен входить и в QR JWT, и в расчет хеша
 
-Пример:
-
-```text
-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
-```
-
-## 2. Считать хеш строго по зафиксированному контракту
+### 2. Считать хеш строго по зафиксированному контракту
 
 Формула должна быть ровно такой:
 
 ```text
-raw = full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
+raw = student_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
 hash = SHA-256(raw)
 ```
 
@@ -66,14 +55,12 @@ hash = SHA-256(raw)
 
 - тот же порядок полей
 - тот же разделитель `|`
-- никаких лишних пробелов, JSON-канонизаций и других форматов
+- никаких лишних пробелов и других форматов
 - результат должен храниться и передаваться как lower-case hex string
 
 Если `Crypto Service` посчитает хеш хоть немного иначе, `pubver` не найдет запись в `diploma_hashes`.
 
-## 3. Формировать QR JWT в плоском виде
-
-`pubver` ожидает не вложенный `student`, а плоский payload.
+### 3. Формировать QR JWT в плоском виде
 
 Ожидаемый header:
 
@@ -106,26 +93,19 @@ hash = SHA-256(raw)
 
 - `vuz_id`
 - `diploma_number`
-- `student_name` или `full_name`
+- `sub`
+- `diploma_hash`
+- `student_name`
 - `specialty`
 - `degree`
 - `faculty`
 - `year`
 - `salt`
-
-Рекомендуемые claims:
-
-- `sub`
-- `diploma_hash`
 - `iat`
 
-`sub` и `diploma_hash` лучше заполнять одинаковым значением, равным пересчитанному хешу.
+`sub` и `diploma_hash` должны быть заполнены одинаковым значением, равным пересчитанному хешу.
 
-`degree` и `faculty` должны передаваться в JWT как обычные строковые claims. `pubver` валидирует их наличие и использует их в формуле хеша, но пока не возвращает в публичном ответе.
-
-## 4. Подписывать QR JWT ключом `Ed25519`
-
-`pubver` больше не использует `RS256`.
+### 4. Подписывать QR JWT ключом `Ed25519`
 
 Требование:
 
@@ -157,11 +137,9 @@ hash = SHA-256(raw)
 - `status`
 - `revoked_at`, если диплом отозван
 
-Сам `Crypto Service` может не писать это напрямую, но он должен отдать результат в таком виде, чтобы основной API смог сохранить его без преобразований, меняющих контракт.
+Сам `Crypto Service` может не писать это напрямую, но он должен отдать результат так, чтобы основной API сохранил его без изменения криптографического контракта.
 
 ## Минимальный результат, который должен вернуться из `Crypto Service`
-
-Если ориентироваться на текущую связку сервисов, на выходе нужен как минимум такой объект:
 
 ```json
 {
@@ -175,7 +153,7 @@ hash = SHA-256(raw)
 }
 ```
 
-Ключевые поля для `pubver` здесь:
+Ключевые поля для `pubver`:
 
 - `vuz_id`
 - `diploma_hash`
@@ -187,11 +165,9 @@ hash = SHA-256(raw)
 
 1. JWT успешно проходит `Ed25519`-проверку.
 2. Из JWT можно собрать все обязательные claims.
-3. Пересчитанный `SHA-256` совпадает с `sub` и `diploma_hash`, если они переданы.
+3. Пересчитанный `SHA-256` совпадает с обязательными `sub` и `diploma_hash`.
 4. Такой хеш найден в `diploma_hashes`.
 5. У записи в реестре статус `active`.
-
-Если хотя бы один из пунктов не выполняется, пользователь не увидит `valid: true`.
 
 ## Что сейчас не требуется от `Crypto Service`
 
@@ -206,9 +182,7 @@ hash = SHA-256(raw)
 Но важно:
 
 - `year` и `specialty` не хранятся пока в БД для `search`
-- при этом они обязательны для QR JWT и обязательны для расчета хеша
-
-То есть убирать их из payload нельзя.
+- при этом `specialty`, `degree`, `faculty`, `year` обязательны для QR JWT и обязательны для расчета хеша
 
 ## Частые причины, почему `pubver` отклонит токен
 
@@ -250,16 +224,19 @@ hash = SHA-256(raw)
 4. Класть в JWT обязательные claims:
    - `vuz_id`
    - `diploma_number`
-   - `student_name` или `full_name`
+   - `sub`
+   - `diploma_hash`
+   - `student_name`
    - `specialty`
    - `degree`
    - `faculty`
    - `year`
    - `salt`
+   - `iat`
 5. Считать хеш строго по формуле:
 
 ```text
-SHA-256(full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)
+SHA-256(student_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)
 ```
 
 6. Отдавать этот хеш как `sub` и `diploma_hash`.

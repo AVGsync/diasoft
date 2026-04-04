@@ -5,7 +5,7 @@
 Public verification uses only:
 
 1. `EdDSA` verification of the QR JWT.
-2. Recomputed `SHA-256(full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)`.
+2. Recomputed `SHA-256(student_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)`.
 3. Lookup in `diploma_hashes`.
 
 `diploma_hashes.signature` is not used by the public verification flow.
@@ -65,12 +65,6 @@ For now they are not stored in PostgreSQL and are returned as `null` placeholder
 3. Query `universities.vuz_code + diploma_hashes.diploma_number`.
 4. Return status and placeholder metadata fields.
 
-## Stub mode
+## Runtime mode
 
-When `USE_STUB_DATA=true`, the service:
-
-- does not connect to PostgreSQL
-- serves built-in active and revoked diploma scenarios
-- logs ready-to-use URLs and JWT tokens for Postman
-
-Stub JWTs are signed with a fresh in-memory `Ed25519` keypair on every startup, so tokens are valid only for the current run.
+The service always connects to real PostgreSQL. There is no in-memory verification stub mode anymore.

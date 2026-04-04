@@ -5,12 +5,7 @@
 - по QR JWT через `GET /api/v1/verify?payload=<jwt>`
 - по номеру диплома и коду ВУЗа через `GET /api/v1/verify/search?diploma_number=&vuz_code=`
 
-Сервис read-only:
-
-- не пишет в Kafka
-- не загружает дипломы
-- не меняет статусы дипломов
-- не расшифровывает `encrypted_payload`
+Сервис работает только с реальной `PostgreSQL` и не содержит runtime-заглушек для верификации.
 
 ## Как работает проверка
 
@@ -19,12 +14,12 @@
 1. Извлекает `vuz_id` из JWT payload без доверия к данным.
 2. Загружает `universities.public_key`.
 3. Проверяет `EdDSA` подпись JWT, то есть подпись `Ed25519`.
-4. Пересчитывает `SHA-256(full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)`.
+4. Пересчитывает `SHA-256(student_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt)`.
 5. Сверяет пересчитанный хеш с `sub` и `diploma_hash`.
 6. Ищет хеш в `diploma_hashes`.
 7. Возвращает статус диплома.
 
-Публичная верификация не использует `diploma_hashes.signature`. Сейчас подлинность QR подтверждается подписью `Ed25519` самого JWT и последующей сверкой хеша с реестром.
+Публичная верификация не использует `diploma_hashes.signature`. Подлинность QR подтверждается подписью `Ed25519` самого JWT и последующей сверкой хеша с реестром.
 
 ## API
 
@@ -50,18 +45,12 @@
   "diploma_number": "ДВС-2024-001234",
   "university": "Bauman Moscow State Technical University",
   "vuz_code": "001X7276",
-  "year": null,
-  "specialty": null
+  "year": 2024,
+  "specialty": "Программная инженерия"
 }
 ```
 
-`vuz_code` - публичный код ВУЗа в формате наподобие `001X7276`, то есть код по сводному реестру. Именно такой код должен храниться в `universities.vuz_code`.
-
-Варианты результата:
-
-- `valid: true`, `status: active`
-- `valid: false`, `status: revoked`
-- `valid: false`, `status: not_found`
+`vuz_code` - публичный код ВУЗа формата `001X7276`, то есть код по сводному реестру.
 
 Ошибки:
 
@@ -80,8 +69,8 @@
   "status": "active",
   "university": "Bauman Moscow State Technical University",
   "vuz_code": "001X7276",
-  "year": null,
-  "specialty": null
+  "year": 2024,
+  "specialty": "Программная инженерия"
 }
 ```
 
@@ -118,26 +107,22 @@
 
 - `vuz_id`
 - `diploma_number`
-- `student_name` или `full_name`
+- `sub`
+- `diploma_hash`
+- `student_name`
 - `specialty`
 - `degree`
 - `faculty`
 - `year`
 - `salt`
-
-Дополнительные claims:
-
-- `sub`
-- `diploma_hash`
 - `iat`
-- `exp`
 
 ## Алгоритм хеширования
 
 `pubver` и Crypto Engine должны использовать одну и ту же строку:
 
 ```text
-full_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
+student_name|diploma_number|specialty|degree|faculty|year|vuz_id|salt
 ```
 
 После этого считается:
@@ -148,11 +133,7 @@ sha256(raw_string)
 
 Результат хранится и сравнивается как lower-case hex string.
 
-`degree` и `faculty` входят в контракт QR JWT и участвуют в формуле хеша, но пока не возвращаются в публичном API.
-
-Реализация:
-
-- [`hash.go`](/d:/diasoft/pubver/pkg/verifyhash/hash.go)
+`degree` и `faculty` участвуют в формуле хеша, но пока не возвращаются в публичном API.
 
 ## Проверка JWT подписи
 
@@ -161,7 +142,7 @@ sha256(raw_string)
 1. Извлекает `vuz_id`
 2. Загружает `universities.public_key`
 3. Проверяет `alg = EdDSA`
-4. Проверяет подпись JWT через Ed25519 public key
+4. Проверяет подпись JWT через `Ed25519` public key
 
 Поддерживаемые форматы `public_key`:
 
@@ -169,23 +150,6 @@ sha256(raw_string)
 - base64 DER
 - hex DER
 - raw 32-byte key
-
-Реализация:
-
-- [`qr_jwt.go`](/d:/diasoft/pubver/pkg/verifyhash/qr_jwt.go)
-- [`ed25519.go`](/d:/diasoft/pubver/pkg/verifyhash/ed25519.go)
-
-## Временные заглушки `year` и `specialty`
-
-Поля `year` и `specialty` сохранены:
-
-- в доменных моделях
-- в JSON-ответах
-- в OpenAPI-контракте
-
-Но пока они не хранятся и не читаются из PostgreSQL. До согласования схемы БД сервис возвращает их как `null`.
-
-Важно: в `verify` эти поля все равно участвуют в пересчете хеша, потому что приходят из QR JWT. Заглушкой является только их хранение в БД и возврат из `search`.
 
 ## Зависимости от БД
 
@@ -209,33 +173,15 @@ sha256(raw_string)
 - `status`
 - `revoked_at`
 
-## Stub-режим без PostgreSQL
+## Временные заглушки `year` и `specialty`
 
-Для локальной ручной проверки можно запустить сервис без БД:
+Поля `year` и `specialty` сохранены:
 
-```powershell
-cd d:\diasoft\pubver
-$env:USE_STUB_DATA="true"
-go run ./cmd/pubver
-```
+- в доменных моделях
+- в JSON-ответах
+- в OpenAPI-контракте
 
-В этом режиме:
-
-- PostgreSQL не используется
-- `verify` и `search` работают на встроенных stub-данных
-- сервис печатает в лог готовые примеры для Postman:
-  - `search_active_url`
-  - `search_revoked_url`
-  - `verify_active_url`
-  - `verify_revoked_url`
-  - `verify_active_token`
-  - `verify_revoked_token`
-
-Важно:
-
-- stub-токены валидны только для текущего запуска сервиса
-- если сервис перезапустить, нужно брать новые `verify_*_url` или `verify_*_token` из свежего лога
-- если порт `:8080` уже занят старым процессом, новый инстанс не поднимется, а старые токены останутся привязаны к старому ключу
+Но пока они не хранятся и не читаются из PostgreSQL. До согласования схемы БД сервис возвращает их как `null`.
 
 ## Миграция `007`
 
@@ -247,27 +193,32 @@ go run ./cmd/pubver
 
 ## Переменные окружения
 
-| Переменная | Обязательная | По умолчанию | Назначение |
-| --- | --- | --- | --- |
-| `DATABASE_URL` | да, кроме stub-режима | нет | строка подключения к PostgreSQL |
-| `HTTP_ADDR` | нет | `:8080` | адрес HTTP-сервера |
-| `REQUEST_TIMEOUT` | нет | `5s` | timeout на запрос |
-| `LOG_LEVEL` | нет | `info` | уровень логирования |
-| `DB_MAX_CONNS` | нет | `10` | лимит подключений к БД |
-| `USE_STUB_DATA` | нет | `false` | запуск без PostgreSQL на встроенных stub-данных |
-
-Пример находится в [.env.example](/d:/diasoft/pubver/.env.example).
-
-Настроить подключение к PostgreSQL можно двумя способами:
+Подключение к `PostgreSQL` можно настроить двумя способами:
 
 1. Через готовый `DATABASE_URL`
 2. Через отдельные переменные `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_SSLMODE`
 
 Если задан `DATABASE_URL`, он имеет приоритет над `POSTGRES_*`.
 
+| Переменная | Обязательная | По умолчанию | Назначение |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | нет, если заданы `POSTGRES_*` | нет | строка подключения к PostgreSQL |
+| `POSTGRES_HOST` | нет, если задан `DATABASE_URL` | нет | host PostgreSQL |
+| `POSTGRES_PORT` | нет | `5432` | port PostgreSQL |
+| `POSTGRES_DB` | нет, если задан `DATABASE_URL` | нет | имя базы |
+| `POSTGRES_USER` | нет, если задан `DATABASE_URL` | нет | пользователь БД |
+| `POSTGRES_PASSWORD` | нет | нет | пароль БД |
+| `POSTGRES_SSLMODE` | нет | `disable` | режим SSL |
+| `HTTP_ADDR` | нет | `:8080` | адрес HTTP-сервера |
+| `REQUEST_TIMEOUT` | нет | `5s` | timeout на запрос |
+| `LOG_LEVEL` | нет | `info` | уровень логирования |
+| `DB_MAX_CONNS` | нет | `10` | лимит подключений к БД |
+
+Пример находится в [.env.example](/d:/diasoft/pubver/.env.example).
+
 ## Локальный запуск
 
-### Боевой режим с PostgreSQL
+### Вариант 1. Через `DATABASE_URL`
 
 ```powershell
 cd d:\diasoft\pubver
@@ -275,7 +226,7 @@ $env:DATABASE_URL="postgres://postgres:postgres@localhost:5432/diasoft?sslmode=d
 go run ./cmd/pubver
 ```
 
-### Боевой режим с отдельными POSTGRES-параметрами
+### Вариант 2. Через `POSTGRES_*`
 
 ```powershell
 cd d:\diasoft\pubver
@@ -285,14 +236,6 @@ $env:POSTGRES_DB="diasoft"
 $env:POSTGRES_USER="postgres"
 $env:POSTGRES_PASSWORD="postgres"
 $env:POSTGRES_SSLMODE="disable"
-go run ./cmd/pubver
-```
-
-### Stub-режим без PostgreSQL
-
-```powershell
-cd d:\diasoft\pubver
-$env:USE_STUB_DATA="true"
 go run ./cmd/pubver
 ```
 
@@ -316,8 +259,6 @@ curl "http://localhost:8080/api/v1/verify/search?diploma_number=ДВС-2024-0012
 curl "http://localhost:8080/api/v1/verify?payload=<jwt>"
 ```
 
-В stub-режиме удобнее брать готовые `verify_*_url` прямо из логов сервиса.
-
 ## Структура проекта
 
 - [`main.go`](/d:/diasoft/pubver/cmd/pubver/main.go) - точка входа
@@ -330,7 +271,6 @@ curl "http://localhost:8080/api/v1/verify?payload=<jwt>"
 - [`verification_service.go`](/d:/diasoft/pubver/internal/service/verification_service.go) - бизнес-логика
 - [`repository.go`](/d:/diasoft/pubver/internal/repository/repository.go) - интерфейс репозитория
 - [`verification_repository.go`](/d:/diasoft/pubver/internal/repository/postgres/verification_repository.go) - PostgreSQL-реализация
-- [`verification_repository.go`](/d:/diasoft/pubver/internal/repository/stub/verification_repository.go) - stub-реализация без БД
 - [`hash.go`](/d:/diasoft/pubver/pkg/verifyhash/hash.go) - сбор строки и SHA-256
 - [`qr_jwt.go`](/d:/diasoft/pubver/pkg/verifyhash/qr_jwt.go) - разбор QR JWT
 - [`ed25519.go`](/d:/diasoft/pubver/pkg/verifyhash/ed25519.go) - проверка `Ed25519`

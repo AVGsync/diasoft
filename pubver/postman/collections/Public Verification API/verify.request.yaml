@@ -1,0 +1,9 @@
+$kind: http-request
+name: Verify diploma by RS256-signed QR JWT
+method: GET
+url: '{{baseUrl}}/api/v1/verify'
+order: 2000
+queryParams:
+  - key: payload
+    value: ''
+    description: JWT from QR code with flat diploma claims

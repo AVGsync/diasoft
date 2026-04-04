@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,13 +14,15 @@ import (
 	"pubver/internal/httpapi"
 	"pubver/internal/repository"
 	"pubver/internal/repository/postgres"
-	"pubver/internal/repository/stub"
 	"pubver/internal/service"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	_ = godotenv.Load()
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("load config", "error", err)
@@ -33,7 +34,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	repo, cleanup, err := newVerificationRepository(ctx, logger, cfg)
+	repo, cleanup, err := newVerificationRepository(ctx, cfg)
 	if err != nil {
 		logger.Error("build repository", "error", err)
 		os.Exit(1)
@@ -79,57 +80,13 @@ func main() {
 	logger.Info("public verification api stopped")
 }
 
-func newVerificationRepository(ctx context.Context, logger *slog.Logger, cfg config.Config) (repository.VerificationRepository, func(), error) {
-	if cfg.UseStubData {
-		repo, scenario, err := stub.NewVerificationRepository()
-		if err != nil {
-			return nil, nil, err
-		}
-
-		logger.Warn("stub mode enabled, PostgreSQL is not used")
-		logger.Info(
-			"stub examples",
-			"search_active_url", buildSearchURL(cfg.HTTPAddr, scenario.ActiveSearchDiplomaNumber, scenario.ActiveSearchVUZCode),
-			"search_revoked_url", buildSearchURL(cfg.HTTPAddr, scenario.RevokedSearchDiplomaNumber, scenario.RevokedSearchVUZCode),
-			"verify_active_url", buildVerifyURL(cfg.HTTPAddr, scenario.ActiveVerifyToken),
-			"verify_revoked_url", buildVerifyURL(cfg.HTTPAddr, scenario.RevokedVerifyToken),
-			"verify_active_token", scenario.ActiveVerifyToken,
-			"verify_revoked_token", scenario.RevokedVerifyToken,
-		)
-
-		return repo, func() {}, nil
-	}
-
+func newVerificationRepository(ctx context.Context, cfg config.Config) (repository.VerificationRepository, func(), error) {
 	pool, err := newDBPool(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	return postgres.NewVerificationRepository(pool), pool.Close, nil
-}
-
-func buildSearchURL(httpAddr, diplomaNumber, vuzCode string) string {
-	query := url.Values{}
-	query.Set("diploma_number", diplomaNumber)
-	query.Set("vuz_code", vuzCode)
-
-	return buildBaseURL(httpAddr) + "/api/v1/verify/search?" + query.Encode()
-}
-
-func buildVerifyURL(httpAddr, token string) string {
-	query := url.Values{}
-	query.Set("payload", token)
-
-	return buildBaseURL(httpAddr) + "/api/v1/verify?" + query.Encode()
-}
-
-func buildBaseURL(httpAddr string) string {
-	base := httpAddr
-	if len(base) > 0 && base[0] == ':' {
-		base = "http://localhost" + base
-	}
-
-	return base
 }
 
 func newLogger(level string) *slog.Logger {
