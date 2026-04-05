@@ -1030,15 +1030,61 @@ function StudentPortalPage({ session }: { session: Session | null }) {
               </div>
 
               {students.length > 0 ? (
-                <Table
-                  className="student-portal-table"
-                  rowKey="diploma_hash"
-                  loading={loading}
-                  columns={studentColumns}
+                <List
+                  className="student-results-list"
                   dataSource={students}
-                  tableLayout="fixed"
-                  scroll={{ x: 980 }}
-                  pagination={{ pageSize: 5, showSizeChanger: false, size: "small" }}
+                  pagination={{ pageSize: 4, showSizeChanger: false, size: "small" }}
+                  renderItem={(record) => (
+                    <List.Item key={record.diploma_hash} className="!block !border-0 !px-0 !py-0">
+                      <div className="student-result-card">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <Text strong className="!mb-0 !block !text-lg !leading-7 !text-ink">
+                                  {record.full_name}
+                                </Text>
+                                <Text type="secondary" className="!mt-1 !block !text-sm !leading-6">
+                                  {record.university_name}
+                                </Text>
+                              </div>
+                              <StatusTag value={record.status} />
+                            </div>
+
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <div>
+                                <Text className="mono-kicker !block !text-[11px] !text-moss">Номер диплома</Text>
+                                <Text className="!mt-2 !block !text-sm !leading-6 !text-ink">{record.diploma_number}</Text>
+                              </div>
+                              <div>
+                                <Text className="mono-kicker !block !text-[11px] !text-moss">Программа</Text>
+                                <Text className="!mt-2 !block !text-sm !leading-6 !text-ink">{record.specialty}</Text>
+                              </div>
+                              <div>
+                                <Text className="mono-kicker !block !text-[11px] !text-moss">Квалификация</Text>
+                                <Text className="!mt-2 !block !text-sm !leading-6 !text-ink">{record.degree}</Text>
+                              </div>
+                              <div>
+                                <Text className="mono-kicker !block !text-[11px] !text-moss">Факультет и год</Text>
+                                <Text className="!mt-2 !block !text-sm !leading-6 !text-ink">
+                                  {record.faculty} · {record.year}
+                                </Text>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="student-result-actions">
+                            <Button className="w-full" onClick={() => void createShareLink(record)}>
+                              Поделиться
+                            </Button>
+                            <Button className="w-full" icon={<ReloadOutlined />} onClick={() => void downloadQr(record)}>
+                              Сгенерировать QR
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </List.Item>
+                  )}
                 />
               ) : (
                 <Empty

@@ -218,6 +218,39 @@ a {
   margin-bottom: 0;
 }
 
+.student-results-list .ant-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.student-results-list .ant-list-pagination {
+  margin-top: 18px;
+  margin-bottom: 0;
+}
+
+.student-result-card {
+  border: 1px solid rgba(55, 71, 133, 0.12);
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 255, 0.92));
+  padding: 22px;
+}
+
+.student-result-actions {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (min-width: 1024px) {
+  .student-result-actions {
+    width: 220px;
+    flex-shrink: 0;
+  }
+}
+
 @media (max-width: 768px) {
   .brand-link {
     align-items: flex-start;
