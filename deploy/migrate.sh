@@ -1,52 +1,104 @@
 #!/bin/sh
 set -eu
 
-build_database_url() {
-  host="${POSTGRES_HOST:-}"
-  port="${POSTGRES_PORT:-5432}"
-  database="${POSTGRES_DB:-}"
-  user="${POSTGRES_USER:-}"
-  password="${POSTGRES_PASSWORD:-}"
-  sslmode="${POSTGRES_SSLMODE:-disable}"
+POSTGRES_HOST="${POSTGRES_HOST:-}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+POSTGRES_DB="${POSTGRES_DB:-}"
+POSTGRES_USER="${POSTGRES_USER:-}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
+POSTGRES_SSLMODE="${POSTGRES_SSLMODE:-disable}"
+DB_MIGRATE_WAIT_TIMEOUT="${DB_MIGRATE_WAIT_TIMEOUT:-60}"
+PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-5}"
+export PGCONNECT_TIMEOUT
 
-  if [ -z "$host" ] || [ -z "$database" ] || [ -z "$user" ]; then
+has_postgres_connection_env() {
+  [ -n "$POSTGRES_HOST" ] && [ -n "$POSTGRES_DB" ] && [ -n "$POSTGRES_USER" ]
+}
+
+build_database_url() {
+  if [ -z "$POSTGRES_HOST" ] || [ -z "$POSTGRES_DB" ] || [ -z "$POSTGRES_USER" ]; then
     return 1
   fi
 
   printf 'postgres://%s:%s@%s:%s/%s?sslmode=%s' \
-    "$user" \
-    "$password" \
-    "$host" \
-    "$port" \
-    "$database" \
-    "$sslmode"
+    "$POSTGRES_USER" \
+    "$POSTGRES_PASSWORD" \
+    "$POSTGRES_HOST" \
+    "$POSTGRES_PORT" \
+    "$POSTGRES_DB" \
+    "$POSTGRES_SSLMODE"
 }
 
-if [ -z "${DATABASE_URL:-}" ]; then
-  if DATABASE_URL="$(build_database_url)"; then
-    export DATABASE_URL
-  fi
+if has_postgres_connection_env; then
+  DATABASE_URL="$(build_database_url)"
+  export DATABASE_URL
+elif [ -n "${DATABASE_URL:-}" ]; then
+  export DATABASE_URL
 fi
 
-if [ -z "${DATABASE_URL:-}" ]; then
-  echo "DATABASE_URL is required" >&2
+if [ -z "${DATABASE_URL:-}" ] && { [ -z "$POSTGRES_HOST" ] || [ -z "$POSTGRES_DB" ] || [ -z "$POSTGRES_USER" ]; }; then
+  echo "DATABASE_URL or POSTGRES_HOST/POSTGRES_DB/POSTGRES_USER is required" >&2
   exit 1
 fi
 
-echo "Waiting for PostgreSQL..."
-until pg_isready -d "$DATABASE_URL" >/dev/null 2>&1; do
+if [ -n "$POSTGRES_HOST" ]; then
+  export PGHOST="$POSTGRES_HOST"
+fi
+if [ -n "$POSTGRES_PORT" ]; then
+  export PGPORT="$POSTGRES_PORT"
+fi
+if [ -n "$POSTGRES_DB" ]; then
+  export PGDATABASE="$POSTGRES_DB"
+fi
+if [ -n "$POSTGRES_USER" ]; then
+  export PGUSER="$POSTGRES_USER"
+fi
+if [ -n "$POSTGRES_PASSWORD" ]; then
+  export PGPASSWORD="$POSTGRES_PASSWORD"
+fi
+if [ -n "$POSTGRES_SSLMODE" ]; then
+  export PGSSLMODE="$POSTGRES_SSLMODE"
+fi
+
+psql_cmd() {
+  if [ -n "${DATABASE_URL:-}" ]; then
+    psql -w "$DATABASE_URL" "$@"
+    return
+  fi
+
+  psql -w "$@"
+}
+
+psql_scalar() {
+  if [ -n "${DATABASE_URL:-}" ]; then
+    psql -w "$DATABASE_URL" -Atc "$1" 2>/dev/null || true
+    return
+  fi
+
+  psql -w -Atc "$1" 2>/dev/null || true
+}
+
+echo "Waiting for PostgreSQL at ${POSTGRES_HOST:-database-host}:${POSTGRES_PORT}..."
+elapsed=0
+until pg_isready -h "${POSTGRES_HOST:-localhost}" -p "$POSTGRES_PORT" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" >/dev/null 2>&1; do
+  elapsed=$((elapsed + 2))
+  if [ "$elapsed" -ge "$DB_MIGRATE_WAIT_TIMEOUT" ]; then
+    echo "Timed out waiting for PostgreSQL after ${DB_MIGRATE_WAIT_TIMEOUT}s." >&2
+    echo "Check POSTGRES_HOST/POSTGRES_PORT and whether the postgres container is accepting TCP connections." >&2
+    exit 1
+  fi
   sleep 2
 done
 
-if ! psql "$DATABASE_URL" -Atc "SELECT 1" >/dev/null 2>&1; then
-  echo "Failed to connect to PostgreSQL using DATABASE_URL." >&2
+if ! psql_cmd -Atc "SELECT 1" >/dev/null 2>&1; then
+  echo "Failed to connect to PostgreSQL with the configured credentials." >&2
   echo "If the postgres volume was initialized with old credentials, either reset the volume or align POSTGRES_PASSWORD with the existing cluster." >&2
   exit 1
 fi
 
 MIGRATIONS_TABLE="file_schema_migrations"
 
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<SQL
+psql_cmd -v ON_ERROR_STOP=1 <<SQL
 CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
     filename TEXT PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -56,12 +108,12 @@ SQL
 table_has_column() {
   table_name="$1"
   column_name="$2"
-  psql "$DATABASE_URL" -Atc "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table_name}' AND column_name = '${column_name}' LIMIT 1;" 2>/dev/null || true
+  psql_scalar "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table_name}' AND column_name = '${column_name}' LIMIT 1;"
 }
 
 table_exists() {
   table_name="$1"
-  psql "$DATABASE_URL" -Atc "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '${table_name}' LIMIT 1;" 2>/dev/null || true
+  psql_scalar "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '${table_name}' LIMIT 1;"
 }
 
 bootstrap_by_prefix() {
@@ -80,7 +132,7 @@ bootstrap_by_prefix() {
     fi
 
     if [ "$migration_number" -le "$target_version" ]; then
-      psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO ${MIGRATIONS_TABLE} (filename) VALUES ('gateway/${base_name}') ON CONFLICT (filename) DO NOTHING;" >/dev/null
+      psql_cmd -v ON_ERROR_STOP=1 -c "INSERT INTO ${MIGRATIONS_TABLE} (filename) VALUES ('gateway/${base_name}') ON CONFLICT (filename) DO NOTHING;" >/dev/null
     fi
   done
 }
@@ -136,11 +188,11 @@ infer_schema_version() {
 legacy_version=""
 
 if [ "$(table_has_column schema_migrations version)" = "1" ]; then
-  legacy_version="$(psql "$DATABASE_URL" -tAc "SELECT COALESCE(MAX(version), 0) FROM schema_migrations" 2>/dev/null || true)"
+  legacy_version="$(psql_scalar "SELECT COALESCE(MAX(version), 0) FROM schema_migrations")"
 elif [ "$(table_has_column schema_migrations filename)" = "1" ]; then
-  legacy_version="$(psql "$DATABASE_URL" -tAc "SELECT COALESCE(MAX((regexp_match(filename, '^gateway/([0-9]+)_'))[1]::bigint), 0) FROM schema_migrations WHERE filename LIKE 'gateway/%'" 2>/dev/null || true)"
+  legacy_version="$(psql_scalar "SELECT COALESCE(MAX((regexp_match(filename, '^gateway/([0-9]+)_'))[1]::bigint), 0) FROM schema_migrations WHERE filename LIKE 'gateway/%'")"
 elif [ "$(table_has_column go_schema_migrations version)" = "1" ]; then
-  legacy_version="$(psql "$DATABASE_URL" -tAc "SELECT COALESCE(MAX(version), 0) FROM go_schema_migrations" 2>/dev/null || true)"
+  legacy_version="$(psql_scalar "SELECT COALESCE(MAX(version), 0) FROM go_schema_migrations")"
 fi
 
 if [ -n "${legacy_version:-}" ] && [ "${legacy_version:-0}" -gt 0 ]; then
@@ -163,8 +215,8 @@ apply_file() {
   fi
 
   echo "Applying migration: $file_name"
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file_path"
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO ${MIGRATIONS_TABLE} (filename) VALUES ('$file_name') ON CONFLICT (filename) DO NOTHING;"
+  psql_cmd -v ON_ERROR_STOP=1 -f "$file_path"
+  psql_cmd -v ON_ERROR_STOP=1 -c "INSERT INTO ${MIGRATIONS_TABLE} (filename) VALUES ('$file_name') ON CONFLICT (filename) DO NOTHING;"
 }
 
 for migration in /workspace/gateway-service/migrations/*.up.sql; do

@@ -241,7 +241,13 @@ func applyEnvOverrides(config *apiserver.Config) {
 }
 
 func applySharedEnvFallbacks(config *apiserver.Config) error {
-	if strings.TrimSpace(config.DB.DatabaseURL) == "" {
+	if hasPostgresConnectionEnv() {
+		databaseURL, err := buildDatabaseURLFromEnv()
+		if err != nil {
+			return err
+		}
+		config.DB.DatabaseURL = databaseURL
+	} else if strings.TrimSpace(config.DB.DatabaseURL) == "" {
 		databaseURL, err := buildDatabaseURLFromEnv()
 		if err != nil {
 			return err
@@ -259,6 +265,12 @@ func applySharedEnvFallbacks(config *apiserver.Config) error {
 	}
 
 	return nil
+}
+
+func hasPostgresConnectionEnv() bool {
+	return strings.TrimSpace(os.Getenv("POSTGRES_HOST")) != "" &&
+		strings.TrimSpace(os.Getenv("POSTGRES_DB")) != "" &&
+		strings.TrimSpace(os.Getenv("POSTGRES_USER")) != ""
 }
 
 func buildDatabaseURLFromEnv() (string, error) {

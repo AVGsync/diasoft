@@ -137,25 +137,25 @@ impl AppConfig {
 }
 
 fn resolve_database_url() -> Result<String, ConfigError> {
-    if let Some(database_url) = first_non_empty_env(&["DATABASE_URL"]) {
-        return Ok(database_url);
-    }
-
     let host = first_non_empty_env(&["POSTGRES_HOST"]).unwrap_or_default();
     let database = first_non_empty_env(&["POSTGRES_DB"]).unwrap_or_default();
     let user = first_non_empty_env(&["POSTGRES_USER"]).unwrap_or_default();
 
-    if host.is_empty() || database.is_empty() || user.is_empty() {
-        return Ok(String::new());
+    if !host.is_empty() && !database.is_empty() && !user.is_empty() {
+        let port = first_non_empty_env(&["POSTGRES_PORT"]).unwrap_or_else(|| "5432".to_string());
+        let password = env::var("POSTGRES_PASSWORD").unwrap_or_default();
+        let sslmode = first_non_empty_env(&["POSTGRES_SSLMODE"]).unwrap_or_else(|| "disable".to_string());
+
+        return Ok(format!(
+            "postgres://{user}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
+        ));
     }
 
-    let port = first_non_empty_env(&["POSTGRES_PORT"]).unwrap_or_else(|| "5432".to_string());
-    let password = env::var("POSTGRES_PASSWORD").unwrap_or_default();
-    let sslmode = first_non_empty_env(&["POSTGRES_SSLMODE"]).unwrap_or_else(|| "disable".to_string());
+    if let Some(database_url) = first_non_empty_env(&["DATABASE_URL"]) {
+        return Ok(database_url);
+    }
 
-    Ok(format!(
-        "postgres://{user}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
-    ))
+    Ok(String::new())
 }
 
 fn first_non_empty_env(keys: &[&str]) -> Option<String> {
