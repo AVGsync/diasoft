@@ -13,6 +13,7 @@ type DB struct {
 	adminRepo        *AdminRepository
 	apiKeyRepo       *APIKeyRepository
 	diplomaRepo      *DiplomaRepository
+	analyticsRepo    *AnalyticsRepository
 	signingKeyRepo   *SigningKeyRepository
 	qrPayloadDecoder QRPayloadDecoder
 }
@@ -76,6 +77,15 @@ func (d *DB) Diploma() *DiplomaRepository {
 
 	d.diplomaRepo = &DiplomaRepository{database: d, qrPayloadDecoder: d.qrPayloadDecoder}
 	return d.diplomaRepo
+}
+
+func (d *DB) Analytics() *AnalyticsRepository {
+	if d.analyticsRepo != nil {
+		return d.analyticsRepo
+	}
+
+	d.analyticsRepo = &AnalyticsRepository{database: d}
+	return d.analyticsRepo
 }
 
 func (d *DB) SigningKey() *SigningKeyRepository {

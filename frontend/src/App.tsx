@@ -58,6 +58,11 @@ import type {
   UniversityRecord,
   VerificationByNumberResponse,
   VerificationByPayloadResponse,
+  VerificationGeoPoint,
+  VerificationStatsResponse,
+  VerificationStatusCount,
+  VerificationTimeBucket,
+  VerificationTopUniversity,
 } from "./lib/types";
 
 const { Title, Paragraph, Text } = Typography;
@@ -86,6 +91,39 @@ const emptyRecord = (): DiplomaRecordInput => ({
   faculty: "",
   year: new Date().getFullYear(),
 });
+
+type StatsRange = {
+  from: string;
+  to: string;
+};
+
+function toDateInputValue(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function defaultStatsRange(): StatsRange {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - 30);
+
+  return {
+    from: toDateInputValue(from),
+    to: toDateInputValue(to),
+  };
+}
+
+function buildStatsRangeQuery(range: StatsRange) {
+  const params = new URLSearchParams();
+  if (range.from) {
+    params.set("from", range.from);
+  }
+  if (range.to) {
+    params.set("to", range.to);
+  }
+
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
 
 const antTheme = {
   token: {
@@ -942,6 +980,16 @@ function StudentPortalPage({ session }: { session: Session | null }) {
     },
   ];
 
+  const applyStatsRange = () => {
+    setAppliedStatsRange(draftStatsRange);
+  };
+
+  const resetStatsRange = () => {
+    const nextRange = defaultStatsRange();
+    setDraftStatsRange(nextRange);
+    setAppliedStatsRange(nextRange);
+  };
+
   return (
     <PublicPageShell session={session}>
       <Space direction="vertical" size={24} className="flex">
@@ -1327,20 +1375,27 @@ function LandingPage({ onLogin }: { onLogin: (session: Session) => void }) {
 function AdminDashboard({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const { message } = AntApp.useApp();
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [verificationStats, setVerificationStats] = useState<VerificationStatsResponse | null>(null);
   const [universities, setUniversities] = useState<UniversityRecord[]>([]);
+  const [appliedStatsRange, setAppliedStatsRange] = useState<StatsRange>(() => defaultStatsRange());
+  const [draftStatsRange, setDraftStatsRange] = useState<StatsRange>(() => defaultStatsRange());
   const [loading, setLoading] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [nextStats, nextUniversities] = await Promise.all([
+      const [nextStats, nextUniversities, nextVerificationStats] = await Promise.all([
         apiRequest<AdminStats>("/admin/stats", { token: session.access_token }),
         apiRequest<UniversityRecord[]>("/admin/universities", { token: session.access_token }),
+        apiRequest<VerificationStatsResponse>(`/admin/stats/verifications${buildStatsRangeQuery(appliedStatsRange)}`, {
+          token: session.access_token,
+        }),
       ]);
 
       setStats(nextStats);
       setUniversities(nextUniversities);
+      setVerificationStats(normalizeVerificationStats(nextVerificationStats));
     } catch (error) {
       message.error((error as Error).message);
     } finally {
@@ -1350,7 +1405,7 @@ function AdminDashboard({ session, onLogout }: { session: Session; onLogout: () 
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [appliedStatsRange.from, appliedStatsRange.to]);
 
   const updateStatus = async (record: UniversityRecord, status: string) => {
     setActionId(record.id);
@@ -1421,6 +1476,16 @@ function AdminDashboard({ session, onLogout }: { session: Session; onLogout: () 
     },
   ];
 
+  const applyStatsRange = () => {
+    setAppliedStatsRange(draftStatsRange);
+  };
+
+  const resetStatsRange = () => {
+    const nextRange = defaultStatsRange();
+    setDraftStatsRange(nextRange);
+    setAppliedStatsRange(nextRange);
+  };
+
   return (
     <Space direction="vertical" size={20} className="flex">
       <HeaderCard
@@ -1454,6 +1519,21 @@ function AdminDashboard({ session, onLogout }: { session: Session; onLogout: () 
       <Card className="glass-card shadow-quiet" title="Реестр вузов">
         <Table rowKey="id" loading={loading} columns={columns} dataSource={universities} pagination={{ pageSize: 8 }} />
       </Card>
+
+      <StatsRangeControls
+        draftRange={draftStatsRange}
+        onDraftChange={setDraftStatsRange}
+        onApply={applyStatsRange}
+        onReset={resetStatsRange}
+        loading={loading}
+      />
+
+      <VerificationStatsPanel
+        title="Аналитика проверок по платформе"
+        stats={verificationStats}
+        loading={loading}
+        showTopUniversities
+      />
     </Space>
   );
 }
@@ -1462,28 +1542,35 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
   const { message } = AntApp.useApp();
   const [profile, setProfile] = useState<UniversityRecord | null>(null);
   const [signingKeyStatus, setSigningKeyStatus] = useState<SigningKeyStatus | null>(null);
+  const [verificationStats, setVerificationStats] = useState<VerificationStatsResponse | null>(null);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
   const [latestApiKey, setLatestApiKey] = useState<ApiKeyCreateResponse | null>(null);
   const [shareLink, setShareLink] = useState<ShareLinkResponse | null>(null);
   const [students, setStudents] = useState<StudentSearchResult[]>([]);
+  const [appliedStatsRange, setAppliedStatsRange] = useState<StatsRange>(() => defaultStatsRange());
+  const [draftStatsRange, setDraftStatsRange] = useState<StatsRange>(() => defaultStatsRange());
   const [loading, setLoading] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
 
   const loadCabinet = async () => {
     setLoading(true);
     try {
-      const [nextProfile, nextSigningKey, nextBatches, nextKeys] = await Promise.all([
+      const [nextProfile, nextSigningKey, nextBatches, nextKeys, nextVerificationStats] = await Promise.all([
         apiRequest<UniversityRecord>("/vuz/profile", { token: session.access_token }),
         apiRequest<SigningKeyStatus>("/vuz/signing-key", { token: session.access_token }).catch(() => null),
         apiRequest<Batch[]>("/vuz/batches?limit=10", { token: session.access_token }),
         apiRequest<ApiKeySummary[]>("/vuz/api-keys", { token: session.access_token }),
+        apiRequest<VerificationStatsResponse>(`/vuz/stats/verifications${buildStatsRangeQuery(appliedStatsRange)}`, {
+          token: session.access_token,
+        }),
       ]);
 
       setProfile(nextProfile);
       setSigningKeyStatus(nextSigningKey);
       setBatches(nextBatches);
       setApiKeys(nextKeys);
+      setVerificationStats(normalizeVerificationStats(nextVerificationStats));
     } catch (error) {
       message.error((error as Error).message);
     } finally {
@@ -1493,7 +1580,7 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
 
   useEffect(() => {
     void loadCabinet();
-  }, []);
+  }, [appliedStatsRange.from, appliedStatsRange.to]);
 
   const uploadSigningKey = async (values: { private_key_pem: string }) => {
     try {
@@ -1984,6 +2071,26 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
             ),
           },
           {
+            key: "analytics",
+            label: "Аналитика",
+            children: (
+              <Space direction="vertical" size={16} className="flex">
+                <StatsRangeControls
+                  draftRange={draftStatsRange}
+                  onDraftChange={setDraftStatsRange}
+                  onApply={applyStatsRange}
+                  onReset={resetStatsRange}
+                  loading={loading}
+                />
+              <VerificationStatsPanel
+                title="Аналитика проверок дипломов"
+                stats={verificationStats}
+                loading={loading}
+              />
+              </Space>
+            ),
+          },
+          {
             key: "registry",
             label: "Поиск и отзыв",
             children: (
@@ -2186,6 +2293,189 @@ function MetricCard({ title, value }: { title: string; value: number | string })
         <Statistic title={title} value={value} />
       </Card>
     </Col>
+  );
+}
+
+function StatsRangeControls({
+  draftRange,
+  onDraftChange,
+  onApply,
+  onReset,
+  loading,
+}: {
+  draftRange: StatsRange;
+  onDraftChange: (range: StatsRange) => void;
+  onApply: () => void;
+  onReset: () => void;
+  loading: boolean;
+}) {
+  return (
+    <Card className="glass-card shadow-quiet" bodyStyle={{ padding: 16 }}>
+      <Space wrap align="end">
+        <div>
+          <Text type="secondary">Период с</Text>
+          <Input
+            type="date"
+            value={draftRange.from}
+            onChange={(event) => onDraftChange({ ...draftRange, from: event.target.value })}
+            style={{ width: 170 }}
+          />
+        </div>
+        <div>
+          <Text type="secondary">По</Text>
+          <Input
+            type="date"
+            value={draftRange.to}
+            onChange={(event) => onDraftChange({ ...draftRange, to: event.target.value })}
+            style={{ width: 170 }}
+          />
+        </div>
+        <Button type="primary" onClick={onApply} loading={loading}>
+          Применить
+        </Button>
+        <Button onClick={onReset} disabled={loading}>
+          Последние 30 дней
+        </Button>
+      </Space>
+    </Card>
+  );
+}
+
+function normalizeVerificationStats(stats: VerificationStatsResponse): VerificationStatsResponse {
+  return {
+    ...stats,
+    statuses: stats.statuses ?? [],
+    timeseries: stats.timeseries ?? [],
+    geography: stats.geography ?? [],
+    top_universities: stats.top_universities ?? [],
+  };
+}
+
+function getStatusCount(stats: VerificationStatsResponse | null, status: string) {
+  if (!stats) {
+    return 0;
+  }
+
+  return stats.statuses.find((item) => item.status === status)?.count ?? 0;
+}
+
+function VerificationStatsPanel({
+  title,
+  stats,
+  loading,
+  showTopUniversities = false,
+}: {
+  title: string;
+  stats: VerificationStatsResponse | null;
+  loading: boolean;
+  showTopUniversities?: boolean;
+}) {
+  const statusColumns: ColumnsType<VerificationStatusCount> = [
+    { title: "Статус", dataIndex: "status" },
+    { title: "Проверок", dataIndex: "count" },
+  ];
+
+  const timeseriesColumns: ColumnsType<VerificationTimeBucket> = [
+    { title: "Дата", dataIndex: "date" },
+    { title: "Проверок", dataIndex: "count" },
+  ];
+
+  const geographyColumns: ColumnsType<VerificationGeoPoint> = [
+    {
+      title: "Страна",
+      dataIndex: "country",
+      render: (value?: string) => value || "Не определена",
+    },
+    {
+      title: "Город",
+      dataIndex: "city",
+      render: (value?: string) => value || "Не определен",
+    },
+    { title: "Проверок", dataIndex: "count" },
+  ];
+
+  const topUniversitiesColumns: ColumnsType<VerificationTopUniversity> = [
+    {
+      title: "Вуз",
+      render: (_, record) => record.name || record.vuz_code || record.vuz_id || "Не определен",
+    },
+    {
+      title: "Код",
+      dataIndex: "vuz_code",
+      render: (value?: string) => value || "—",
+    },
+    { title: "Проверок", dataIndex: "checks" },
+  ];
+
+  return (
+    <Card className="glass-card shadow-quiet" title={title} loading={loading}>
+      {stats ? (
+        <Space direction="vertical" size={20} className="flex">
+          <Row gutter={[16, 16]}>
+            <MetricCard title="Всего проверок" value={stats.total_checks} />
+            <MetricCard title="Уникальных источников" value={stats.unique_requesters} />
+            <MetricCard title="Active" value={getStatusCount(stats, "active")} />
+            <MetricCard title="Invalid payload" value={getStatusCount(stats, "invalid_payload")} />
+            <MetricCard title="Not found" value={getStatusCount(stats, "not_found")} />
+            <MetricCard title="Revoked" value={getStatusCount(stats, "revoked")} />
+          </Row>
+
+          <Descriptions column={1} size="small">
+            <Descriptions.Item label="Период с">{formatDate(stats.from)}</Descriptions.Item>
+            <Descriptions.Item label="Период по">{formatDate(stats.to)}</Descriptions.Item>
+          </Descriptions>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
+              <Card type="inner" title="Распределение статусов">
+                <Table
+                  rowKey={(record) => record.status}
+                  columns={statusColumns}
+                  dataSource={stats.statuses}
+                  pagination={false}
+                  locale={{ emptyText: "Пока нет данных" }}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} lg={12}>
+              <Card type="inner" title="Динамика по дням">
+                <Table
+                  rowKey={(record) => record.date}
+                  columns={timeseriesColumns}
+                  dataSource={stats.timeseries}
+                  pagination={false}
+                  locale={{ emptyText: "Пока нет данных" }}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          <Card type="inner" title="География запросов">
+            <Table
+              rowKey={(record) => `${record.country ?? ""}-${record.city ?? ""}-${record.count}`}
+              columns={geographyColumns}
+              dataSource={stats.geography}
+              pagination={false}
+              locale={{ emptyText: "География пока не определена" }}
+            />
+          </Card>
+
+          {showTopUniversities && (
+            <Card type="inner" title="Топ университетов">
+              <Table
+                rowKey={(record) => record.vuz_id || record.vuz_code || record.name || String(record.checks)}
+                columns={topUniversitiesColumns}
+                dataSource={stats.top_universities ?? []}
+                pagination={false}
+                locale={{ emptyText: "Пока нет данных" }}
+              />
+            </Card>
+          )}
+        </Space>
+      ) : (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Аналитика пока не загружена." />
+      )}
+    </Card>
   );
 }
 

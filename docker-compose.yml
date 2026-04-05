@@ -58,7 +58,8 @@ services:
       - -ec
       - >
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.raw_tasks --partitions 1 --replication-factor 1 &&
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.processing_results --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.processing_results --partitions 1 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic verification.events --partitions 1 --replication-factor 1
     restart: "no"
 
   kafka-ui:
@@ -136,6 +137,8 @@ services:
       KAFKA_BROKERS: kafka:29092
       KAFKA_RAW_TOPIC: diplomas.raw_tasks
       KAFKA_RESULTS_TOPIC: diplomas.processing_results
+      KAFKA_VERIFICATION_EVENTS_TOPIC: verification.events
+      KAFKA_VERIFICATION_EVENTS_GROUP: gateway-service-verifications
       KAFKA_CONSUMER_GROUP: gateway-service
       RATE_LIMIT_ENABLED: "true"
       RATE_LIMIT_KEY_TTL: 15m
@@ -198,6 +201,8 @@ services:
       DATABASE_URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
       LOG_LEVEL: info
       JWT_ENC_SECRET: XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI=
+      # Local development only: trust Docker bridge so X-Forwarded-For can be used to test GeoIP.
+      TRUSTED_PROXY_CIDRS: 127.0.0.1/32,172.16.0.0/12
       RATE_LIMIT_ENABLED: "true"
       RATE_LIMIT_VERIFY_RPS: "0.25"
       RATE_LIMIT_VERIFY_BURST: "5"
@@ -208,6 +213,13 @@ services:
       RATE_LIMIT_REDIS_PASSWORD: diasoft-rate-limit-secret
       RATE_LIMIT_REDIS_DB: "0"
       RATE_LIMIT_REDIS_PREFIX: rl:pubver
+      ANALYTICS_ENABLED: "true"
+      ANALYTICS_KAFKA_BROKERS: kafka:29092
+      ANALYTICS_KAFKA_TOPIC: verification.events
+      ANALYTICS_KAFKA_CLIENT_ID: pubver-analytics
+      ANALYTICS_KAFKA_WRITE_TIMEOUT: 3s
+      ANALYTICS_QUEUE_SIZE: "1024"
+      ANALYTICS_GEOIP_DB_PATH: /app/geoip/GeoLite2-City.mmdb
       CACHE_ENABLED: "true"
       CACHE_UNIVERSITY_KEY_TTL: 30m
       CACHE_DIPLOMA_BY_HASH_TTL: 1m
@@ -216,6 +228,8 @@ services:
       CACHE_REDIS_PASSWORD: diasoft-rate-limit-secret
       CACHE_REDIS_DB: "0"
       CACHE_REDIS_PREFIX: cache:pubver
+    volumes:
+      - ./geoip:/app/geoip:ro
     ports:
       - "8082:8080"
 

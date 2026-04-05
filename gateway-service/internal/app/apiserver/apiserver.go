@@ -28,15 +28,16 @@ import (
 )
 
 type APIServer struct {
-	config      *Config
-	logger      *slog.Logger
-	router      *chi.Mux
-	db          *postgres.DB
-	httpServer  *http.Server
-	kafkaWriter *kafkainfra.Producer
-	kafkaReader *kafkainfra.ResultConsumer
-	rateLimiter *httpmw.RateLimiter
-	cache       *rediscache.Client
+	config          *Config
+	logger          *slog.Logger
+	router          *chi.Mux
+	db              *postgres.DB
+	httpServer      *http.Server
+	kafkaWriter     *kafkainfra.Producer
+	kafkaReader     *kafkainfra.ResultConsumer
+	analyticsReader *kafkainfra.VerificationEventConsumer
+	rateLimiter     *httpmw.RateLimiter
+	cache           *rediscache.Client
 }
 
 func New(config *Config) *APIServer {
@@ -63,6 +64,9 @@ func (s *APIServer) Start() error {
 
 	if s.kafkaReader != nil {
 		go s.kafkaReader.Start(rootCtx)
+	}
+	if s.analyticsReader != nil {
+		go s.analyticsReader.Start(rootCtx)
 	}
 
 	s.httpServer = &http.Server{
@@ -93,6 +97,9 @@ func (s *APIServer) Start() error {
 	}
 	if s.kafkaReader != nil {
 		_ = s.kafkaReader.Close()
+	}
+	if s.analyticsReader != nil {
+		_ = s.analyticsReader.Close()
 	}
 	if s.kafkaWriter != nil {
 		_ = s.kafkaWriter.Close()
@@ -152,6 +159,7 @@ func (s *APIServer) configureRouter() error {
 	diplomaService := service.NewDiplomaService(s.db.Diploma(), kafkaWriter, excelGenerator)
 	studentService := service.NewStudentService(s.db.Diploma(), tokenManager, qrGenerator, s.config.PublicBaseURL, s.config.ShareTokenTTL)
 	universityService := service.NewUniversityCabinetService(s.db.University(), s.db.Diploma())
+	analyticsService := service.NewAnalyticsService(s.db.Analytics())
 
 	if err := adminService.EnsureBootstrapAdmin(context.Background(), s.config.BootstrapAdminEmail, s.config.BootstrapAdminPassword); err != nil {
 		return err
@@ -166,6 +174,7 @@ func (s *APIServer) configureRouter() error {
 		handler.DiplomaUseCase
 		HandleProcessingResult(ctx context.Context, result *model.KafkaProcessingResult) error
 	} = diplomaService
+	analyticsUseCase := handler.AnalyticsUseCase(analyticsService)
 
 	rateLimiter, err := httpmw.NewRateLimiter(context.Background(), s.logger, httpmw.RateLimitConfig{
 		Enabled:           s.config.RateLimit.Enabled,
@@ -216,9 +225,11 @@ func (s *APIServer) configureRouter() error {
 
 	s.kafkaWriter = kafkaWriter
 	s.kafkaReader = kafkainfra.NewResultConsumer(s.config.Kafka, diplomaUseCase, s.logger)
+	s.analyticsReader = kafkainfra.NewVerificationEventConsumer(s.config.Kafka, analyticsService, s.logger)
 
 	authHandler := handler.NewAuthHandler(authService, validator)
 	adminHandler := handler.NewAdminHandler(adminUseCase)
+	analyticsHandler := handler.NewAnalyticsHandler(analyticsUseCase)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService, validator)
 	signingKeyHandler := handler.NewSigningKeyHandler(signingKeyService, validator)
 	diplomaHandler := handler.NewDiplomaHandler(diplomaUseCase, validator)
@@ -268,6 +279,7 @@ func (s *APIServer) configureRouter() error {
 			r.Patch("/universities/{id}", adminHandler.UpdateUniversityStatus())
 			r.Delete("/universities/{id}", adminHandler.DeleteUniversity())
 			r.Get("/stats", adminHandler.Stats())
+			r.Get("/stats/verifications", analyticsHandler.AdminVerificationStats())
 		})
 
 		r.Route("/vuz", func(r chi.Router) {
@@ -276,6 +288,7 @@ func (s *APIServer) configureRouter() error {
 			r.Use(rateLimiter.Middleware(universityPolicy, httpmw.SubjectByUniversityOrIP))
 			r.Get("/profile", universityHandler.Profile())
 			r.Get("/batches", universityHandler.ListBatches())
+			r.Get("/stats/verifications", analyticsHandler.UniversityVerificationStats())
 			r.Post("/api-keys", apiKeyHandler.Create())
 			r.Get("/api-keys", apiKeyHandler.List())
 			r.Put("/signing-key", signingKeyHandler.Upsert())

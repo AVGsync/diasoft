@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"pubver/internal/analytics"
 	"pubver/internal/config"
 	"pubver/internal/httpapi"
 	"pubver/internal/rediscache"
@@ -43,6 +44,30 @@ func main() {
 	defer cleanup()
 
 	verificationService := service.NewVerificationService(repo, logger, cfg.JWTEncKey)
+
+	var analyticsTracker analytics.Tracker
+	if cfg.Analytics.Enabled {
+		var geoResolver analytics.GeoResolver
+		if cfg.Analytics.GeoIPDBPath != "" {
+			geoResolver, err = analytics.NewMaxMindGeoResolver(cfg.Analytics.GeoIPDBPath)
+			if err != nil {
+				logger.Warn("geo resolver disabled", "path", cfg.Analytics.GeoIPDBPath, "error", err)
+			}
+		}
+
+		analyticsTracker = analytics.NewKafkaTracker(logger, analytics.KafkaConfig{
+			Brokers:      cfg.Analytics.KafkaBrokers,
+			Topic:        cfg.Analytics.KafkaTopic,
+			ClientID:     cfg.Analytics.ClientID,
+			WriteTimeout: cfg.Analytics.WriteTimeout,
+			QueueSize:    cfg.Analytics.QueueSize,
+		}, geoResolver)
+		defer func() {
+			if err := analyticsTracker.Close(); err != nil {
+				logger.Warn("close analytics tracker", "error", err)
+			}
+		}()
+	}
 
 	var rateLimiter *httpapi.RateLimiter
 	if cfg.RateLimit.Enabled {
@@ -81,6 +106,7 @@ func main() {
 			logger,
 			cfg.RequestTimeout,
 			rateLimiter,
+			analyticsTracker,
 			verificationService,
 		),
 		ReadHeaderTimeout: 5 * time.Second,

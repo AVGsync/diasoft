@@ -23,6 +23,7 @@ type Config struct {
 	JWTEncKey      []byte
 	RateLimit      RateLimitConfig
 	Cache          CacheConfig
+	Analytics      AnalyticsConfig
 }
 
 type RateLimitConfig struct {
@@ -52,6 +53,16 @@ type CacheConfig struct {
 	DiplomaRecordByHashTTL time.Duration
 	DiplomaSearchResultTTL time.Duration
 	Redis                  RedisConfig
+}
+
+type AnalyticsConfig struct {
+	Enabled      bool
+	KafkaBrokers []string
+	KafkaTopic   string
+	ClientID     string
+	WriteTimeout time.Duration
+	QueueSize    int
+	GeoIPDBPath  string
 }
 
 func Load() (Config, error) {
@@ -87,7 +98,15 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	analyticsEnabled, err := envBoolOrDefault("ANALYTICS_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	cacheRedisDB, err := envIntOrDefault("CACHE_REDIS_DB", redisDB)
+	if err != nil {
+		return Config{}, err
+	}
+	analyticsQueueSize, err := envIntOrDefault("ANALYTICS_QUEUE_SIZE", 1024)
 	if err != nil {
 		return Config{}, err
 	}
@@ -125,6 +144,15 @@ func Load() (Config, error) {
 				ReadTimeout:  2 * time.Second,
 				WriteTimeout: 2 * time.Second,
 			},
+		},
+		Analytics: AnalyticsConfig{
+			Enabled:      analyticsEnabled,
+			KafkaBrokers: splitAndTrim(os.Getenv("ANALYTICS_KAFKA_BROKERS")),
+			KafkaTopic:   strings.TrimSpace(envOrDefault("ANALYTICS_KAFKA_TOPIC", "verification.events")),
+			ClientID:     strings.TrimSpace(envOrDefault("ANALYTICS_KAFKA_CLIENT_ID", "pubver-analytics")),
+			WriteTimeout: 3 * time.Second,
+			QueueSize:    analyticsQueueSize,
+			GeoIPDBPath:  strings.TrimSpace(os.Getenv("ANALYTICS_GEOIP_DB_PATH")),
 		},
 	}
 
@@ -225,6 +253,27 @@ func Load() (Config, error) {
 			return Config{}, errors.New("CACHE_DIPLOMA_BY_HASH_TTL must be greater than zero when cache is enabled")
 		case cfg.Cache.DiplomaSearchResultTTL <= 0:
 			return Config{}, errors.New("CACHE_DIPLOMA_SEARCH_TTL must be greater than zero when cache is enabled")
+		}
+	}
+
+	analyticsWriteTimeout, err := time.ParseDuration(envOrDefault("ANALYTICS_KAFKA_WRITE_TIMEOUT", "3s"))
+	if err != nil {
+		return Config{}, fmt.Errorf("ANALYTICS_KAFKA_WRITE_TIMEOUT must be a valid duration: %w", err)
+	}
+	cfg.Analytics.WriteTimeout = analyticsWriteTimeout
+
+	if cfg.Analytics.Enabled {
+		switch {
+		case len(cfg.Analytics.KafkaBrokers) == 0:
+			return Config{}, errors.New("ANALYTICS_KAFKA_BROKERS must be set when analytics is enabled")
+		case strings.TrimSpace(cfg.Analytics.KafkaTopic) == "":
+			return Config{}, errors.New("ANALYTICS_KAFKA_TOPIC must not be empty when analytics is enabled")
+		case strings.TrimSpace(cfg.Analytics.ClientID) == "":
+			return Config{}, errors.New("ANALYTICS_KAFKA_CLIENT_ID must not be empty when analytics is enabled")
+		case cfg.Analytics.WriteTimeout <= 0:
+			return Config{}, errors.New("ANALYTICS_KAFKA_WRITE_TIMEOUT must be greater than zero when analytics is enabled")
+		case cfg.Analytics.QueueSize <= 0:
+			return Config{}, errors.New("ANALYTICS_QUEUE_SIZE must be greater than zero when analytics is enabled")
 		}
 	}
 

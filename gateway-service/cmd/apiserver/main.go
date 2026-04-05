@@ -221,6 +221,12 @@ func applyEnvOverrides(config *apiserver.Config) {
 	if value := os.Getenv("KAFKA_RESULTS_TOPIC"); value != "" {
 		config.Kafka.ProcessingResultsTopic = value
 	}
+	if value := os.Getenv("KAFKA_VERIFICATION_EVENTS_TOPIC"); value != "" {
+		config.Kafka.VerificationEventsTopic = value
+	}
+	if value := os.Getenv("KAFKA_VERIFICATION_EVENTS_GROUP"); value != "" {
+		config.Kafka.VerificationEventsGroup = value
+	}
 	if value := os.Getenv("KAFKA_CONSUMER_GROUP"); value != "" {
 		config.Kafka.ConsumerGroup = value
 	}

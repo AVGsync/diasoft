@@ -54,5 +54,7 @@ database_url = "postgres://gateway_user:gateway_password@localhost:5432/postgres
 brokers = ["localhost:9092"]
 raw_tasks_topic = "diplomas.raw_tasks"
 processing_results_topic = "diplomas.processing_results"
+verification_events_topic = "verification.events"
+verification_events_group = "gateway-service-verifications"
 consumer_group = "gateway-service"
 client_id = "gateway-service"
