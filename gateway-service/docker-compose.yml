@@ -8,11 +8,11 @@ services:
       POSTGRES_USER: gateway_user
       POSTGRES_PASSWORD: gateway_password
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gateway_user -d postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U gateway_user -d postgres']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,7 +22,8 @@ services:
     container_name: gateway-kafka
     restart: unless-stopped
     ports:
-      - "9092:9092"
+      - '9092:9092'
+      - '29092:29092'
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -38,7 +39,11 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      test:
+        [
+          'CMD-SHELL',
+          '/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1',
+        ]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -51,8 +56,14 @@ services:
     command:
       - /bin/sh
       - -ec
-      - /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.raw_tasks --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.processing_results --partitions 1 --replication-factor 1
-    restart: "no"
+      - |
+        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list >/dev/null 2>&1; do
+          echo "Waiting for Kafka..."
+          sleep 5
+        done
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.raw_tasks --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.processing_results --partitions 1 --replication-factor 1
+    restart: on-failure
 
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
@@ -62,9 +73,9 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8081:8080"
+      - '8081:8080'
     environment:
-      DYNAMIC_CONFIG_ENABLED: "true"
+      DYNAMIC_CONFIG_ENABLED: 'true'
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
 
