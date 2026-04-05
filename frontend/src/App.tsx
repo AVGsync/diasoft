@@ -868,24 +868,21 @@ function StudentPortalPage({ session }: { session: Session | null }) {
   const [loading, setLoading] = useState(false);
   const [shareLink, setShareLink] = useState<ShareLinkResponse | null>(null);
 
-  const handleSearch = async (values: { diploma_number?: string; full_name?: string }) => {
-    const diplomaNumber = values.diploma_number?.trim() ?? "";
-    const fullName = values.full_name?.trim() ?? "";
+  const handleSearch = async (values: { diploma_number: string; full_name: string }) => {
+    const diplomaNumber = values.diploma_number.trim();
+    const fullName = values.full_name.trim();
 
-    if (!diplomaNumber && !fullName) {
-      message.warning("Укажите номер диплома или ФИО.");
+    if (!diplomaNumber || !fullName) {
+      message.warning("Заполните номер диплома и ФИО.");
       return;
     }
 
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (diplomaNumber) {
-        params.set("diploma_number", diplomaNumber);
-      }
-      if (fullName) {
-        params.set("full_name", fullName);
-      }
+      const params = new URLSearchParams({
+        diploma_number: diplomaNumber,
+        full_name: fullName,
+      });
 
       const response = await apiRequest<StudentSearchResult[]>(`/student/search?${params.toString()}`);
       setStudents(response);
@@ -931,35 +928,55 @@ function StudentPortalPage({ session }: { session: Session | null }) {
     {
       title: "Студент",
       dataIndex: "full_name",
+      width: 280,
       render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{record.full_name}</Text>
-          <Text type="secondary">{record.university_name}</Text>
-        </Space>
+        <div className="min-w-0">
+          <Text strong className="!mb-0 !block !text-sm !leading-6">
+            {record.full_name}
+          </Text>
+          <Text type="secondary" className="!mt-1 !block !text-xs !leading-5">
+            {record.university_name}
+          </Text>
+        </div>
       ),
     },
     {
       title: "Диплом",
       dataIndex: "diploma_number",
+      width: 160,
+      render: (value) => <Text className="mono-kicker !text-[12px] !tracking-[0.08em] !text-ink">{value}</Text>,
     },
     {
       title: "Программа",
-      render: (_, record) => `${record.specialty} · ${record.year}`,
+      width: 240,
+      render: (_, record) => (
+        <div className="min-w-0">
+          <Text className="!mb-0 !block !text-sm !leading-6 !text-ink">{record.specialty}</Text>
+          <Text type="secondary" className="!mt-1 !block !text-xs !leading-5">
+            {record.degree} · {record.faculty} · {record.year}
+          </Text>
+        </div>
+      ),
     },
     {
       title: "Статус",
       dataIndex: "status",
+      width: 120,
+      align: "center",
       render: (value) => <StatusTag value={value} />,
     },
     {
       title: "Действия",
+      width: 230,
       render: (_, record) => (
-        <Space wrap>
-          <Button onClick={() => void createShareLink(record)}>Поделиться</Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void downloadQr(record)}>
+        <div className="flex min-w-[200px] flex-col gap-2">
+          <Button className="w-full" onClick={() => void createShareLink(record)}>
+            Поделиться
+          </Button>
+          <Button className="w-full" icon={<ReloadOutlined />} onClick={() => void downloadQr(record)}>
             Сгенерировать QR
           </Button>
-        </Space>
+        </div>
       ),
     },
   ];
@@ -968,8 +985,8 @@ function StudentPortalPage({ session }: { session: Session | null }) {
     <PublicPageShell session={session}>
       <Space direction="vertical" size={24} className="flex">
         <div className="grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
-          <Card className="hero-card shadow-quiet" bodyStyle={{ padding: 32 }}>
-            <Space direction="vertical" size={20} className="flex">
+          <Card className="hero-card shadow-quiet h-full" bodyStyle={{ padding: 32, height: "100%" }}>
+            <Space direction="vertical" size={20} className="flex h-full">
               <div>
                 <Text className="mono-kicker text-moss">портал студента</Text>
                 <Title level={2} className="!mb-3 !mt-4 !text-ink">
@@ -982,10 +999,18 @@ function StudentPortalPage({ session }: { session: Session | null }) {
               </div>
 
               <Form layout="vertical" onFinish={handleSearch}>
-                <Form.Item label="Номер диплома" name="diploma_number">
+                <Form.Item
+                  label="Номер диплома"
+                  name="diploma_number"
+                  rules={[{ required: true, whitespace: true, message: "Укажите номер диплома." }]}
+                >
                   <Input placeholder="DVS-2026-0001" />
                 </Form.Item>
-                <Form.Item label="ФИО" name="full_name">
+                <Form.Item
+                  label="ФИО"
+                  name="full_name"
+                  rules={[{ required: true, whitespace: true, message: "Укажите ФИО." }]}
+                >
                   <Input placeholder="Иванов Иван Иванович" />
                 </Form.Item>
                 <Button type="primary" icon={<SearchOutlined />} htmlType="submit" loading={loading}>
@@ -995,8 +1020,8 @@ function StudentPortalPage({ session }: { session: Session | null }) {
             </Space>
           </Card>
 
-          <Card className="glass-card shadow-quiet" bodyStyle={{ padding: 32 }}>
-            <Space direction="vertical" size={18} className="flex">
+          <Card className="glass-card shadow-quiet h-full" bodyStyle={{ padding: 32, height: "100%" }}>
+            <Space direction="vertical" size={18} className="flex h-full">
               <div>
                 <Text className="mono-kicker text-moss">результаты поиска</Text>
                 <Title level={3} className="!mb-0 !mt-3 !text-ink">
@@ -1006,11 +1031,14 @@ function StudentPortalPage({ session }: { session: Session | null }) {
 
               {students.length > 0 ? (
                 <Table
+                  className="student-portal-table"
                   rowKey="diploma_hash"
                   loading={loading}
                   columns={studentColumns}
                   dataSource={students}
-                  pagination={{ pageSize: 5 }}
+                  tableLayout="fixed"
+                  scroll={{ x: 980 }}
+                  pagination={{ pageSize: 5, showSizeChanger: false, size: "small" }}
                 />
               ) : (
                 <Empty
