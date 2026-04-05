@@ -34,7 +34,7 @@ impl DiplomaProcessor {
         }
     }
 
-    pub async fn process(&self, task: DiplomaTask) {
+    pub async fn process(&self, task: DiplomaTask) -> AppResult<()> {
         info!(
             batch_id = %task.batch_id,
             record_index = task.record_index,
@@ -60,14 +60,15 @@ impl DiplomaProcessor {
                     );
                 }
                 
-                if let Err(e) = self.producer.send_result(&result).await {
+                self.producer.send_result(&result).await.map_err(|e| {
                     error!(
                         batch_id = %task.batch_id,
                         record_index = task.record_index,
                         error = %e,
                         "Failed to send processing result to Kafka"
                     );
-                }
+                    e
+                })?;
             }
             Err(e) => {
                 error!(
@@ -84,16 +85,20 @@ impl DiplomaProcessor {
                     e.to_string(),
                 );
                 
-                if let Err(e) = self.producer.send_result(&error_result).await {
+                self.producer.send_result(&error_result).await.map_err(|send_error| {
                     error!(
                         batch_id = %task.batch_id,
                         record_index = task.record_index,
-                        error = %e,
+                        error = %send_error,
+                        processing_error = %e,
                         "Failed to send error result to Kafka"
                     );
-                }
+                    send_error
+                })?;
             }
         }
+
+        Ok(())
     }
 
     async fn process_inner(&self, task: &DiplomaTask) -> AppResult<ProcessingResult> {

@@ -91,8 +91,7 @@ async fn main() -> anyhow::Result<()> {
                 let processor = processor.clone();
                 
                 async move {
-                    processor.process(task).await;
-                    Ok(())
+                    processor.process(task).await
                 }
             }).await;
             
