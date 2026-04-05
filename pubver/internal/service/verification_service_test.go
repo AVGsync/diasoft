@@ -191,6 +191,26 @@ func TestSearchNotFound(t *testing.T) {
 	}
 }
 
+func TestSearchReturnsPartialResponseWhenStoredQRIsInvalid(t *testing.T) {
+	service := NewVerificationService(fakeRepository{
+		searchRecord: &domain.DiplomaRecord{
+			DiplomaNumber: "DIP-2022-0003",
+			Status:        domain.DiplomaStatusActive,
+			University:    domain.University{Name: "Demo University", Code: "DEMO2026"},
+			QRPayload:     stringPtr("not-a-valid-jwt"),
+		},
+	}, slog.Default(), []byte("0123456789abcdef0123456789abcdef"))
+
+	response, err := service.Search(context.Background(), "DEMO2026", "DIP-2022-0003")
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+
+	if !response.Valid || response.Status != domain.DiplomaStatusActive || response.University != "Demo University" || response.VUZCode != "DEMO2026" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
 func TestSearchInvalidInput(t *testing.T) {
 	service := NewVerificationService(fakeRepository{}, slog.Default(), []byte("0123456789abcdef0123456789abcdef"))
 
@@ -205,6 +225,10 @@ func buildValidToken(t *testing.T, encKey []byte) string {
 	keyPair := testutil.MustGenerateEd25519KeyPair(t)
 	token, _ := buildTokenAndHash(t, keyPair, encKey, false)
 	return token
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func buildTokenForKey(t *testing.T, keyPair testutil.Ed25519KeyPair, encKey []byte, mismatch bool) string {

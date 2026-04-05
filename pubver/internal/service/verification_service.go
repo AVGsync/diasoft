@@ -129,8 +129,7 @@ func (s *VerificationService) Search(ctx context.Context, vuzCode, diplomaNumber
 	}
 
 	if err := s.enrichRecordFromStoredQR(record); err != nil {
-		s.logger.Error("enrich diploma metadata from stored qr", "vuz_code", vuzCode, "diploma_number", diplomaNumber, "error", err)
-		return domain.SearchResponse{}, err
+		s.logger.Warn("enrich diploma metadata from stored qr", "vuz_code", vuzCode, "diploma_number", diplomaNumber, "error", err)
 	}
 
 	return domain.SearchResponse{
