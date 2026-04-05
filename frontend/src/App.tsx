@@ -1562,6 +1562,7 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
 
     let cancelled = false;
     let timerId: number | undefined;
+    let pollFailures = 0;
 
     const pollBatch = async () => {
       try {
@@ -1574,6 +1575,7 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
         }
 
         upsertBatch(nextBatch);
+        pollFailures = 0;
 
         if (isBatchTerminal(nextBatch.status)) {
           setTrackedBatchId((current) => (current === nextBatch.id ? null : current));
@@ -1586,8 +1588,16 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
           }
           return;
         }
-      } catch {
+      } catch (error) {
         if (cancelled) {
+          return;
+        }
+
+        pollFailures += 1;
+        if (pollFailures >= 3) {
+          setTrackedBatchId((current) => (current === activeBatch.id ? null : current));
+          void loadCabinet();
+          message.error(`Не удалось обновить статус батча ${activeBatch.id.slice(0, 8)}: ${(error as Error).message}`);
           return;
         }
       }

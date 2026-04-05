@@ -71,6 +71,9 @@ func (h *UniversityHandler) ListBatches() http.HandlerFunc {
 			return
 		}
 
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		writeJSON(w, http.StatusOK, batches)
 	}
 }
