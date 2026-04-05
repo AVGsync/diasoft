@@ -1682,15 +1682,15 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", csvFile);
-
     setUploadingMode("csv");
     try {
       const response = await apiRequest<BatchUploadResponse>("/diplomas/upload", {
         method: "POST",
         token: session.access_token,
-        body: formData,
+        body: csvFile,
+        headers: {
+          "Content-Type": csvFile.type || "text/csv",
+        },
       });
 
       setTrackedBatchId(response.batch_id);
@@ -2148,6 +2148,7 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
                     />
                     <Upload.Dragger
                       maxCount={1}
+                      accept=".csv,text/csv,application/vnd.ms-excel"
                       disabled={uploadingMode === "csv"}
                       beforeUpload={(file) => {
                         setCsvFile(file);

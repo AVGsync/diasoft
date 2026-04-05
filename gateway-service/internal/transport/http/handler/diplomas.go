@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strconv"
@@ -43,14 +44,19 @@ func (h *DiplomaHandler) Upload() http.HandlerFunc {
 			return
 		}
 
+		slog.Info("received diploma upload request", "vuz_id", vuzID, "content_type", r.Header.Get("Content-Type"), "content_length", r.ContentLength)
+
 		records, err := h.parseRecords(r)
 		if err != nil {
+			slog.Warn("failed to parse diploma upload request", "vuz_id", vuzID, "error", err)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		slog.Info("parsed diploma upload records", "vuz_id", vuzID, "records_count", len(records))
 
 		for index := range records {
 			if ok, err := h.validator.ValidateStruct(&records[index]); !ok {
+				slog.Warn("validation failed for diploma upload record", "vuz_id", vuzID, "record_index", index, "error", err)
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -58,9 +64,11 @@ func (h *DiplomaHandler) Upload() http.HandlerFunc {
 
 		response, err := h.diplomas.Upload(r.Context(), vuzID, records)
 		if err != nil {
+			slog.Error("failed to upload diplomas", "vuz_id", vuzID, "records_count", len(records), "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to upload diplomas")
 			return
 		}
+		slog.Info("created diploma batch", "vuz_id", vuzID, "batch_id", response.BatchID, "records_count", len(records))
 
 		writeJSON(w, http.StatusAccepted, response)
 	}
