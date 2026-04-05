@@ -173,6 +173,13 @@ a {
   vertical-align: top;
 }
 
+.student-portal-table,
+.student-portal-table .ant-table-wrapper,
+.student-portal-table .ant-spin-nested-loading,
+.student-portal-table .ant-spin-container {
+  min-width: 0;
+}
+
 .student-portal-table .ant-table-thead > tr > th:nth-child(1),
 .student-portal-table .ant-table-tbody > tr > td:nth-child(1) {
   min-width: 240px;

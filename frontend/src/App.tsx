@@ -984,9 +984,9 @@ function StudentPortalPage({ session }: { session: Session | null }) {
   return (
     <PublicPageShell session={session}>
       <Space direction="vertical" size={24} className="flex">
-        <div className="grid items-start gap-6 lg:grid-cols-[0.92fr_1.08fr]">
-          <Card className="hero-card shadow-quiet" bodyStyle={{ padding: 32 }}>
-            <Space direction="vertical" size={20} className="flex">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
+          <Card className="hero-card min-w-0 shadow-quiet" bodyStyle={{ padding: 32 }}>
+            <Space direction="vertical" size={20} className="flex min-w-0">
               <div>
                 <Text className="mono-kicker text-moss">портал студента</Text>
                 <Title level={2} className="!mb-3 !mt-4 !text-ink">
@@ -1020,8 +1020,8 @@ function StudentPortalPage({ session }: { session: Session | null }) {
             </Space>
           </Card>
 
-          <Card className="glass-card shadow-quiet" bodyStyle={{ padding: 32 }}>
-            <Space direction="vertical" size={18} className="flex">
+          <Card className="glass-card min-w-0 shadow-quiet" bodyStyle={{ padding: 32 }}>
+            <Space direction="vertical" size={18} className="flex min-w-0">
               <div>
                 <Text className="mono-kicker text-moss">результаты поиска</Text>
                 <Title level={3} className="!mb-0 !mt-3 !text-ink">
