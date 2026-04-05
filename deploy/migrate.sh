@@ -59,12 +59,12 @@ bootstrap_by_prefix() {
 }
 
 infer_schema_version() {
-  if [ "$(table_exists batch_record_payloads)" = "1" ]; then
-    printf '14'
+  if [ "$(table_exists verification_events)" = "1" ]; then
+    printf '15'
     return
   fi
-  if [ "$(table_exists verification_events)" = "1" ]; then
-    printf '13'
+  if [ "$(table_exists batch_record_payloads)" = "1" ]; then
+    printf '14'
     return
   fi
   if [ "$(table_exists batch_record_attributes)" = "1" ]; then

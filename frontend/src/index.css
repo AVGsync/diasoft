@@ -195,16 +195,123 @@ a {
   gap: 10px;
 }
 
+.analytics-panel .ant-card-head {
+  min-height: 58px;
+  padding-inline: 24px;
+}
+
+.analytics-panel .ant-card-body {
+  padding: 24px !important;
+}
+
+.analytics-panel .ant-card-type-inner > .ant-card-head {
+  min-height: 54px;
+  padding-inline: 20px;
+}
+
+.analytics-panel .ant-card-type-inner > .ant-card-body {
+  padding: 14px 20px 18px !important;
+}
+
+.analytics-metrics-row > .ant-col > .ant-card {
+  min-height: 116px;
+}
+
+.analytics-metrics-row > .ant-col > .ant-card .ant-card-body {
+  display: flex;
+  min-height: 116px;
+  align-items: center;
+  padding: 20px 24px !important;
+}
+
+.analytics-metrics-row .ant-statistic {
+  width: 100%;
+}
+
+.analytics-metrics-row .ant-statistic-content {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.analytics-range-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.analytics-range-field {
+  display: flex;
+  min-width: 170px;
+  flex: 0 0 170px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.analytics-range-field .ant-input {
+  height: 44px;
+}
+
+.analytics-range-button {
+  height: 44px !important;
+  padding-inline: 18px !important;
+}
+
+.analytics-panel .ant-table {
+  background: transparent;
+}
+
+.analytics-panel .ant-table-container {
+  overflow: hidden;
+  border-radius: 20px;
+}
+
+.analytics-panel .ant-table table {
+  table-layout: fixed;
+}
+
+.analytics-panel .ant-table-thead > tr > th {
+  font-weight: 600;
+}
+
+.analytics-panel .ant-table-tbody > tr > td {
+  padding-top: 18px;
+  padding-bottom: 18px;
+  vertical-align: middle;
+}
+
+.analytics-panel .ant-empty {
+  margin-block: 20px;
+}
+
+.analytics-split-row > .ant-col > .ant-card {
+  height: 100%;
+}
+
 @media (min-width: 1024px) {
   .student-result-actions {
     width: 220px;
     flex-shrink: 0;
+  }
+
+  .analytics-metrics-row > .ant-col {
+    flex: 0 0 33.333333% !important;
+    max-width: 33.333333% !important;
   }
 }
 
 @media (max-width: 768px) {
   .brand-link {
     align-items: flex-start;
+  }
+
+  .analytics-range-field {
+    min-width: 100%;
+    flex-basis: 100%;
+  }
+
+  .analytics-range-button {
+    width: 100%;
   }
 }
 

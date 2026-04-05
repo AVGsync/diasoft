@@ -14,7 +14,6 @@
 - `kafka-ui` - интерфейс для просмотра топиков
 - `db-migrate` - сервис применения SQL-миграций
 
-`verify-service` как отдельный сервис больше не используется. Публичная проверка реализована в `pubver`.
 
 ## Что решает система
 
@@ -199,13 +198,6 @@
   Может встречаться как legacy-таблица от более ранних экспериментов с `golang-migrate`.
   Для текущего деплоя она не требуется.
 
-### Удалённые legacy-таблицы
-
-- `batch_records` - удалена
-- `batch_record_attributes` - удалена
-
-Текущая модель не хранит открытые персональные данные в этих старых таблицах.
-
 ## Что хранится в открытом виде, а что шифруется
 
 ### Шифруется в БД
@@ -243,13 +235,6 @@
   "salt": "..."
 }
 ```
-
-### Хранится в открытом виде
-
-- `diploma_hashes.diploma_number`
-  Нужен для поиска и проверки по номеру диплома.
-
-- служебные статусы, идентификаторы вузов, коды вузов, timestamps
 
 ## Криптография и безопасность
 
@@ -397,65 +382,6 @@ docker compose up -d --build
 8. `pubver`
 9. `frontend`
 
-## Как работает `db-migrate`
-
-Для production/deploy используется file-based мигратор:
-
-- Dockerfile: [`deploy/db-migrate.Dockerfile`](./deploy/db-migrate.Dockerfile)
-- script: [`deploy/migrate.sh`](./deploy/migrate.sh)
-
-Это сделано специально, потому что текущий набор SQL-файлов является рабочим, но не полностью совместим с `golang-migrate` по version-based правилам.
-
-## Troubleshooting
-
-### `db-migrate` завершился с `exit 1`
-
-Проверить:
-
-1. совпадает ли пароль Postgres в `docker-compose.yml`
-2. не остался ли старый volume, созданный на сломанной конфигурации
-3. доступен ли `DATABASE_URL` внутри `db-migrate`
-4. нет ли legacy-таблиц миграций от предыдущего способа запуска
-
-Если БД не нужна и можно начать с нуля:
-
-```bash
-docker compose down -v
-docker compose up -d --build
-```
-
-Если volume нужно сохранить, а раньше Postgres был поднят с другим паролем, надо отдельно сменить пароль пользователя в уже существующей БД.
-
-Текущий `deploy/migrate.sh` умеет автоматически подхватывать:
-
-- `schema_migrations` с колонкой `version`
-- `schema_migrations` с колонкой `filename`
-- `go_schema_migrations`
-- уже существующую схему БД, даже если трекинг SQL-файлов ещё не был создан
-
-### `404` при логине demo-пользователей
-
-Было две причины:
-
-- frontend nginx не проксировал `/api/` в `gateway-service`
-- demo admin и demo university не были гарантированно созданы при старте
-
-Текущее состояние:
-
-- `frontend/nginx.conf` проксирует `/api/` и `/verify-api/`
-- `gateway-service` на старте делает bootstrap admin и demo university
-
-### Батч завис в `pending`
-
-Проверить:
-
-- есть ли сообщения в `diplomas.raw_tasks`
-- читает ли их `cryptography-engine-rs`
-- обновляется ли `batches.processed_records`
-- есть ли строки в `batch_results`
-
-Текущая реализация воркера пишет результат в PostgreSQL напрямую и только после этого публикует сообщение в result-topic.
-
 ## Demo-данные
 
 ### Тестовые пользователи
@@ -471,19 +397,4 @@ docker compose up -d --build
 
 - [`deploy/demo/demo_university_ed25519_private_key.pem`](./deploy/demo/demo_university_ed25519_private_key.pem)
 
-## Что говорить на защите
 
-Короткая версия:
-
-1. `gateway-service` принимает батчи и управляет платформой.
-2. `cryptography-engine-rs` отвечает за хэширование, шифрование и подпись QR/JWT.
-3. `pubver` изолирует публичную проверку от внутреннего кабинета вуза.
-4. В БД не хранится plaintext-таблица с полными данными дипломов; исходные записи батча лежат в зашифрованном виде.
-5. Проверка диплома не доверяет payload вслепую: подпись JWT проверяется, `enc` расшифровывается, хэш пересчитывается заново и сверяется с реестром.
-6. Kafka отделяет тяжёлую криптообработку от пользовательского API и позволяет масштабировать pipeline.
-
-## Дополнительная документация
-
-- [`gateway-service/PROJECT_DOCUMENTATION.md`](./gateway-service/PROJECT_DOCUMENTATION.md)
-- [`gateway-service/README.md`](./gateway-service/README.md)
-- [`pubver/README.md`](./pubver/README.md)

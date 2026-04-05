@@ -66,31 +66,32 @@ func (h *AnalyticsHandler) AdminVerificationStats() http.HandlerFunc {
 }
 
 func parseStatsRange(r *http.Request) (time.Time, time.Time, error) {
-	from, err := parseOptionalTime(r.URL.Query().Get("from"))
+	from, err := parseOptionalTime(r.URL.Query().Get("from"), false)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	to, err := parseOptionalTime(r.URL.Query().Get("to"))
+	to, err := parseOptionalTime(r.URL.Query().Get("to"), true)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
 	return from, to, nil
 }
 
-func parseOptionalTime(value string) (time.Time, error) {
+func parseOptionalTime(value string, endInclusive bool) (time.Time, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return time.Time{}, nil
 	}
 
-	layouts := []string{
-		time.RFC3339,
-		"2006-01-02",
+	if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		return parsed, nil
 	}
-	for _, layout := range layouts {
-		if parsed, err := time.Parse(layout, trimmed); err == nil {
-			return parsed, nil
+
+	if parsed, err := time.Parse("2006-01-02", trimmed); err == nil {
+		if endInclusive {
+			return parsed.AddDate(0, 0, 1), nil
 		}
+		return parsed, nil
 	}
 
 	return time.Time{}, ErrBadRequest("invalid time format, use RFC3339 or YYYY-MM-DD")

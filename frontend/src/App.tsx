@@ -133,7 +133,7 @@ function toDateInputValue(date: Date) {
 function defaultStatsRange(): StatsRange {
 	const to = new Date()
 	const from = new Date()
-	from.setDate(to.getDate() - 30)
+	from.setDate(to.getDate() - 29)
 
 	return {
 		from: toDateInputValue(from),
@@ -3436,8 +3436,8 @@ function StatsRangeControls({
 	loading: boolean
 }) {
 	return (
-		<Space wrap align='end'>
-			<div>
+		<div className='analytics-range-toolbar'>
+			<div className='analytics-range-field'>
 				<Text type='secondary'>Период с</Text>
 				<Input
 					type='date'
@@ -3445,10 +3445,9 @@ function StatsRangeControls({
 					onChange={event =>
 						onDraftChange({ ...draftRange, from: event.target.value })
 					}
-					style={{ width: 170 }}
 				/>
 			</div>
-			<div>
+			<div className='analytics-range-field'>
 				<Text type='secondary'>По</Text>
 				<Input
 					type='date'
@@ -3456,16 +3455,24 @@ function StatsRangeControls({
 					onChange={event =>
 						onDraftChange({ ...draftRange, to: event.target.value })
 					}
-					style={{ width: 170 }}
 				/>
 			</div>
-			<Button type='primary' onClick={onApply} loading={loading}>
+			<Button
+				type='primary'
+				onClick={onApply}
+				loading={loading}
+				className='analytics-range-button'
+			>
 				Применить
 			</Button>
-			<Button onClick={onReset} disabled={loading}>
+			<Button
+				onClick={onReset}
+				disabled={loading}
+				className='analytics-range-button'
+			>
 				Последние 30 дней
 			</Button>
-		</Space>
+		</div>
 	)
 }
 
@@ -3544,10 +3551,14 @@ function VerificationStatsPanel({
 	]
 
 	return (
-		<Card className='glass-card shadow-quiet' title={title} loading={loading}>
+		<Card
+			className='glass-card shadow-quiet analytics-panel'
+			title={title}
+			loading={loading}
+		>
 			{stats ? (
 				<Space direction='vertical' size={20} className='flex'>
-					<Row gutter={[16, 16]}>
+					<Row gutter={[16, 16]} className='analytics-metrics-row'>
 						<MetricCard title='Всего проверок' value={stats.total_checks} />
 						<MetricCard
 							title='Уникальных источников'
@@ -3582,7 +3593,7 @@ function VerificationStatsPanel({
 						</Descriptions>
 					)}
 
-					<Row gutter={[16, 16]}>
+					<Row gutter={[16, 16]} className='analytics-split-row'>
 						<Col xs={24} lg={12}>
 							<Card type='inner' title='Распределение статусов'>
 								<Table
