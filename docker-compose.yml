@@ -11,7 +11,7 @@ services:
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: gateway_user
-      POSTGRES_PASSWORD:
+      POSTGRES_PASSWORD: gateway_password
     ports:
       - '5432:5432'
     volumes:
@@ -138,7 +138,7 @@ services:
       SHARE_JWT_SECRET: gateway-share-secret
       SIGNING_KEYS_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       QR_PAYLOAD_ENCRYPTION_SECRET: XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI=
-      PUBLIC_BASE_URL: http://localhost:3000
+      PUBLIC_BASE_URL: http://localhost:80
       BOOTSTRAP_ADMIN_EMAIL: admin@platform.local
       BOOTSTRAP_ADMIN_PASSWORD: Admin12345!
       DEMO_UNIVERSITY_NAME: Демо Университет
