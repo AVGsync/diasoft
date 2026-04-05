@@ -149,7 +149,7 @@ services:
       APP__DATABASE__URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
       APP__JWT__AUTH_HMAC_SECRET: gateway-share-secret
       APP__JWT__PAYLOAD_SECRET: XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI=
-      APP__APP__VERIFICATION_BASE_URL: http://localhost:3000/verify?payload=
+      APP__APP__VERIFICATION_BASE_URL: http://localhost:80/verify?payload=
       APP__APP__ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       RUST_LOG: info,rdkafka=warn,sqlx=warn
 
