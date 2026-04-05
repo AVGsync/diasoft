@@ -98,7 +98,10 @@ type StatsRange = {
 };
 
 function toDateInputValue(date: Date) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function defaultStatsRange(): StatsRange {
@@ -980,16 +983,6 @@ function StudentPortalPage({ session }: { session: Session | null }) {
     },
   ];
 
-  const applyStatsRange = () => {
-    setAppliedStatsRange(draftStatsRange);
-  };
-
-  const resetStatsRange = () => {
-    const nextRange = defaultStatsRange();
-    setDraftStatsRange(nextRange);
-    setAppliedStatsRange(nextRange);
-  };
-
   return (
     <PublicPageShell session={session}>
       <Space direction="vertical" size={24} className="flex">
@@ -1520,19 +1513,20 @@ function AdminDashboard({ session, onLogout }: { session: Session; onLogout: () 
         <Table rowKey="id" loading={loading} columns={columns} dataSource={universities} pagination={{ pageSize: 8 }} />
       </Card>
 
-      <StatsRangeControls
-        draftRange={draftStatsRange}
-        onDraftChange={setDraftStatsRange}
-        onApply={applyStatsRange}
-        onReset={resetStatsRange}
-        loading={loading}
-      />
-
       <VerificationStatsPanel
         title="Аналитика проверок по платформе"
         stats={verificationStats}
         loading={loading}
         showTopUniversities
+        rangeControls={
+          <StatsRangeControls
+            draftRange={draftStatsRange}
+            onDraftChange={setDraftStatsRange}
+            onApply={applyStatsRange}
+            onReset={resetStatsRange}
+            loading={loading}
+          />
+        }
       />
     </Space>
   );
@@ -1787,6 +1781,16 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
       ),
     },
   ];
+
+  const applyStatsRange = () => {
+    setAppliedStatsRange(draftStatsRange);
+  };
+
+  const resetStatsRange = () => {
+    const nextRange = defaultStatsRange();
+    setDraftStatsRange(nextRange);
+    setAppliedStatsRange(nextRange);
+  };
 
   return (
     <Space direction="vertical" size={20} className="flex">
@@ -2075,17 +2079,19 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
             label: "Аналитика",
             children: (
               <Space direction="vertical" size={16} className="flex">
-                <StatsRangeControls
-                  draftRange={draftStatsRange}
-                  onDraftChange={setDraftStatsRange}
-                  onApply={applyStatsRange}
-                  onReset={resetStatsRange}
-                  loading={loading}
-                />
-              <VerificationStatsPanel
+                <VerificationStatsPanel
                 title="Аналитика проверок дипломов"
                 stats={verificationStats}
                 loading={loading}
+                rangeControls={
+                  <StatsRangeControls
+                    draftRange={draftStatsRange}
+                    onDraftChange={setDraftStatsRange}
+                    onApply={applyStatsRange}
+                    onReset={resetStatsRange}
+                    loading={loading}
+                  />
+                }
               />
               </Space>
             ),
@@ -2310,8 +2316,7 @@ function StatsRangeControls({
   loading: boolean;
 }) {
   return (
-    <Card className="glass-card shadow-quiet" bodyStyle={{ padding: 16 }}>
-      <Space wrap align="end">
+    <Space wrap align="end">
         <div>
           <Text type="secondary">Период с</Text>
           <Input
@@ -2337,7 +2342,6 @@ function StatsRangeControls({
           Последние 30 дней
         </Button>
       </Space>
-    </Card>
   );
 }
 
@@ -2364,11 +2368,13 @@ function VerificationStatsPanel({
   stats,
   loading,
   showTopUniversities = false,
+  rangeControls,
 }: {
   title: string;
   stats: VerificationStatsResponse | null;
   loading: boolean;
   showTopUniversities?: boolean;
+  rangeControls?: ReactNode;
 }) {
   const statusColumns: ColumnsType<VerificationStatusCount> = [
     { title: "Статус", dataIndex: "status" },
@@ -2420,10 +2426,10 @@ function VerificationStatsPanel({
             <MetricCard title="Revoked" value={getStatusCount(stats, "revoked")} />
           </Row>
 
-          <Descriptions column={1} size="small">
+          {rangeControls ?? <Descriptions column={1} size="small">
             <Descriptions.Item label="Период с">{formatDate(stats.from)}</Descriptions.Item>
             <Descriptions.Item label="Период по">{formatDate(stats.to)}</Descriptions.Item>
-          </Descriptions>
+          </Descriptions>}
 
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={12}>
