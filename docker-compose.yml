@@ -126,7 +126,7 @@ services:
     build:
       context: ./gateway-service
       extra_hosts:
-        - "http.docker.internal:host-gateway"
+        - 'http.docker.internal:host-gateway'
     container_name: diasoft-gateway-service
     restart: unless-stopped
     depends_on:
@@ -184,7 +184,7 @@ services:
     build:
       context: ./cryptography-engine-rs
       extra_hosts:
-        - "http.docker.internal:host-gateway"
+        - 'http.docker.internal:host-gateway'
     container_name: diasoft-cryptography-engine
     restart: unless-stopped
     depends_on:
@@ -208,7 +208,7 @@ services:
     build:
       context: ./pubver
       extra_hosts:
-        - "http.docker.internal:host-gateway"
+        - 'http.docker.internal:host-gateway'
     container_name: diasoft-pubver
     restart: unless-stopped
     depends_on:
@@ -257,7 +257,7 @@ services:
     build:
       context: ./frontend
       extra_hosts:
-        - "http.docker.internal:host-gateway"
+        - 'http.docker.internal:host-gateway'
     container_name: diasoft-frontend
     restart: unless-stopped
     depends_on:
