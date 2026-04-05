@@ -1,6 +1,33 @@
 #!/bin/sh
 set -eu
 
+build_database_url() {
+  host="${POSTGRES_HOST:-}"
+  port="${POSTGRES_PORT:-5432}"
+  database="${POSTGRES_DB:-}"
+  user="${POSTGRES_USER:-}"
+  password="${POSTGRES_PASSWORD:-}"
+  sslmode="${POSTGRES_SSLMODE:-disable}"
+
+  if [ -z "$host" ] || [ -z "$database" ] || [ -z "$user" ]; then
+    return 1
+  fi
+
+  printf 'postgres://%s:%s@%s:%s/%s?sslmode=%s' \
+    "$user" \
+    "$password" \
+    "$host" \
+    "$port" \
+    "$database" \
+    "$sslmode"
+}
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  if DATABASE_URL="$(build_database_url)"; then
+    export DATABASE_URL
+  fi
+fi
+
 if [ -z "${DATABASE_URL:-}" ]; then
   echo "DATABASE_URL is required" >&2
   exit 1
