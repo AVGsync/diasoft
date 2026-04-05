@@ -170,6 +170,3 @@ full_name,diploma_number,specialty,degree,faculty,year
 
 Допустимые значения `degree`: `Бакалавр`, `Магистр`, `Специалист`.
 
-## Разработчики
-
-Иванов Иван — fullstack, [https://t.me/test@name1](https://t.me/test@name1)
