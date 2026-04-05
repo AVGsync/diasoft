@@ -11,7 +11,7 @@ services:
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: gateway_user
-      POSTGRES_PASSWORD: gateway_password
+      POSTGRES_PASSWORD:    
     ports:
       - "5432:5432"
     volumes:

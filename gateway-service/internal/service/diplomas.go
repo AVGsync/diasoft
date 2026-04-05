@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/diasoft/gateway-service/internal/model"
@@ -86,6 +87,7 @@ func (s *DiplomaService) DownloadBatch(ctx context.Context, batchID, vuzID strin
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("building batch excel", "batch_id", batchID, "vuz_id", vuzID, "rows", len(rows))
 	return s.excelFile.BuildBatch(rows)
 }
 

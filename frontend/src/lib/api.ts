@@ -125,7 +125,7 @@ function buildRequestInit(options: {
 }) {
   const { method, token, body, headers = {}, verifyApi = false } = options;
   const requestHeaders: Record<string, string> = { ...headers };
-  const init: RequestInit = { method, headers: requestHeaders };
+  const init: RequestInit = { method, headers: requestHeaders, cache: "no-store" };
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
 
   if (token) {
@@ -187,6 +187,11 @@ export function downloadBlob(blob: Blob, fileName: string) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
-  window.URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(url);
+  }, 1000);
 }

@@ -107,6 +107,7 @@ interface BatchDownloadState {
 }
 
 const BATCH_POLL_INTERVAL_MS = 2500;
+const AUTO_TRACK_BATCH_WINDOW_MS = 15 * 60 * 1000;
 
 const antTheme = {
   token: {
@@ -1496,7 +1497,7 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
 
   const activeBatch =
     batches.find((batch) => batch.id === trackedBatchId) ??
-    batches.find((batch) => !isBatchTerminal(batch.status)) ??
+    batches.find((batch) => shouldAutoTrackBatch(batch)) ??
     null;
 
   const upsertBatch = (nextBatch: Batch) => {
@@ -1530,16 +1531,16 @@ function UniversityDashboard({ session, onLogout }: { session: Session; onLogout
       setBatches(nextBatches);
       setApiKeys(nextKeys);
 
-      const nextProcessingBatch = nextBatches.find((batch) => !isBatchTerminal(batch.status));
       setTrackedBatchId((current) => {
         if (current) {
           const currentBatch = nextBatches.find((batch) => batch.id === current);
           if (currentBatch && !isBatchTerminal(currentBatch.status)) {
             return current;
           }
+          return null;
         }
 
-        return nextProcessingBatch?.id ?? null;
+        return nextBatches.find((batch) => shouldAutoTrackBatch(batch))?.id ?? null;
       });
     } catch (error) {
       message.error((error as Error).message);
@@ -2472,6 +2473,19 @@ function VerificationPayloadResult({ result }: { result: VerificationByPayloadRe
 
 function isBatchTerminal(status: string) {
   return status === "completed" || status === "failed";
+}
+
+function shouldAutoTrackBatch(batch: Batch) {
+  if (isBatchTerminal(batch.status)) {
+    return false;
+  }
+
+  const createdAt = new Date(batch.created_at).getTime();
+  if (Number.isNaN(createdAt)) {
+    return false;
+  }
+
+  return Date.now() - createdAt <= AUTO_TRACK_BATCH_WINDOW_MS;
 }
 
 function getBatchProgressPercent(batch: Batch) {
