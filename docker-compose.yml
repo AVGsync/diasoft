@@ -2,9 +2,6 @@ x-build-proxy: &build-proxy
   BUILD_HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
   BUILD_HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
   BUILD_NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,::1,postgres,kafka,redis,gateway-service,pubver,frontend}
-  HTTP_PROXY: http://http.docker.internal:3128
-  HTTPS_PROXY: http://http.docker.internal:3128
-  NO_PROXY: localhost,127.0.0.1,::1,postgres,kafka,redis,gateway-service,pubver,frontend
 
 services:
   postgres:
