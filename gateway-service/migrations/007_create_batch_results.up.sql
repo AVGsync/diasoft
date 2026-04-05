@@ -1,4 +1,4 @@
-CREATE TABLE batch_results (
+CREATE TABLE IF NOT EXISTS batch_results (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     batch_id          UUID NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
     record_index      INTEGER NOT NULL,
@@ -13,5 +13,5 @@ CREATE TABLE batch_results (
     UNIQUE(diploma_hash)
 );
 
-CREATE INDEX idx_batch_results_batch_id ON batch_results(batch_id);
-CREATE INDEX idx_batch_results_diploma_hash ON batch_results(diploma_hash);
+CREATE INDEX IF NOT EXISTS idx_batch_results_batch_id ON batch_results(batch_id);
+CREATE INDEX IF NOT EXISTS idx_batch_results_diploma_hash ON batch_results(diploma_hash);

@@ -1,4 +1,4 @@
-CREATE TABLE verification_events (
+CREATE TABLE IF NOT EXISTS verification_events (
     id             BIGSERIAL PRIMARY KEY,
     event_id       VARCHAR(64) NOT NULL UNIQUE,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -16,20 +16,20 @@ CREATE TABLE verification_events (
     user_agent     TEXT
 );
 
-CREATE INDEX idx_verification_events_created_at
+CREATE INDEX IF NOT EXISTS idx_verification_events_created_at
     ON verification_events(created_at DESC);
 
-CREATE INDEX idx_verification_events_vuz_id_created_at
+CREATE INDEX IF NOT EXISTS idx_verification_events_vuz_id_created_at
     ON verification_events(vuz_id, created_at DESC);
 
-CREATE INDEX idx_verification_events_vuz_code_created_at
+CREATE INDEX IF NOT EXISTS idx_verification_events_vuz_code_created_at
     ON verification_events(vuz_code, created_at DESC);
 
-CREATE INDEX idx_verification_events_status_created_at
+CREATE INDEX IF NOT EXISTS idx_verification_events_status_created_at
     ON verification_events(status, created_at DESC);
 
-CREATE INDEX idx_verification_events_endpoint_created_at
+CREATE INDEX IF NOT EXISTS idx_verification_events_endpoint_created_at
     ON verification_events(endpoint, created_at DESC);
 
-CREATE INDEX idx_verification_events_country_created_at
+CREATE INDEX IF NOT EXISTS idx_verification_events_country_created_at
     ON verification_events(country, created_at DESC);

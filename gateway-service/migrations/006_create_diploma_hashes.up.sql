@@ -1,4 +1,4 @@
-CREATE TABLE diploma_hashes (
+CREATE TABLE IF NOT EXISTS diploma_hashes (
     hash           VARCHAR(64) PRIMARY KEY,
     vuz_id         UUID NOT NULL REFERENCES universities(id),
     diploma_number VARCHAR(50),
@@ -10,5 +10,5 @@ CREATE TABLE diploma_hashes (
     UNIQUE(vuz_id, diploma_number)
 );
 
-CREATE INDEX idx_diploma_hashes_vuz_id ON diploma_hashes(vuz_id);
-CREATE INDEX idx_diploma_hashes_diploma_number ON diploma_hashes(diploma_number);
+CREATE INDEX IF NOT EXISTS idx_diploma_hashes_vuz_id ON diploma_hashes(vuz_id);
+CREATE INDEX IF NOT EXISTS idx_diploma_hashes_diploma_number ON diploma_hashes(diploma_number);

@@ -1,4 +1,4 @@
-CREATE TABLE university_signing_keys (
+CREATE TABLE IF NOT EXISTS university_signing_keys (
     vuz_id                 UUID PRIMARY KEY REFERENCES universities(id) ON DELETE CASCADE,
     encrypted_private_key  TEXT NOT NULL,
     key_algorithm          VARCHAR(20) NOT NULL DEFAULT 'ed25519'
@@ -9,5 +9,5 @@ CREATE TABLE university_signing_keys (
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_university_signing_keys_public_key_fingerprint
+CREATE INDEX IF NOT EXISTS idx_university_signing_keys_public_key_fingerprint
     ON university_signing_keys(public_key_fingerprint);

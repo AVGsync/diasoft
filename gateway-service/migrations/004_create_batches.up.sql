@@ -1,4 +1,4 @@
-CREATE TABLE batches (
+CREATE TABLE IF NOT EXISTS batches (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     vuz_id            UUID NOT NULL REFERENCES universities(id),
     status            VARCHAR(20) NOT NULL DEFAULT 'processing'
@@ -9,4 +9,4 @@ CREATE TABLE batches (
     completed_at      TIMESTAMPTZ
 );
 
-CREATE INDEX idx_batches_vuz_id ON batches(vuz_id);
+CREATE INDEX IF NOT EXISTS idx_batches_vuz_id ON batches(vuz_id);

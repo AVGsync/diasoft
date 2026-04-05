@@ -1,4 +1,4 @@
-CREATE TABLE universities (
+CREATE TABLE IF NOT EXISTS universities (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     vuz_code      VARCHAR(20) NOT NULL UNIQUE,
     name          VARCHAR(255) NOT NULL,

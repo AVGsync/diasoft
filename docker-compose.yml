@@ -3,21 +3,27 @@ x-build-proxy: &build-proxy
   BUILD_HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
   BUILD_NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,::1,postgres,kafka,redis,gateway-service,pubver,frontend}
 
+x-postgres-env: &postgres-env
+  POSTGRES_DB: ${POSTGRES_DB:-postgres}
+  POSTGRES_USER: ${POSTGRES_USER:-gateway_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gateway_password}
+
+x-database-url: &database-url postgres://${POSTGRES_USER:-gateway_user}:${POSTGRES_PASSWORD:-gateway_password}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+x-public-base-url: &public-base-url ${PUBLIC_BASE_URL:-http://localhost:80}
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: diasoft-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: postgres
-      POSTGRES_USER: gateway_user
-      POSTGRES_PASSWORD: gateway_password
+      <<: *postgres-env
     ports:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U gateway_user -d postgres']
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -33,7 +39,7 @@ services:
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://${KAFKA_EXTERNAL_HOST:-localhost}:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
@@ -111,7 +117,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
+      DATABASE_URL: *database-url
     volumes:
       - .:/workspace:ro
     restart: 'no'
@@ -133,12 +139,12 @@ services:
     environment:
       BIND_ADDR: ':8080'
       LOG_LEVEL: 'debug'
-      DATABASE_URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
+      DATABASE_URL: *database-url
       JWT_SECRET: gateway-access-secret
       SHARE_JWT_SECRET: gateway-share-secret
       SIGNING_KEYS_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       QR_PAYLOAD_ENCRYPTION_SECRET: XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI=
-      PUBLIC_BASE_URL: http://localhost:80
+      PUBLIC_BASE_URL: *public-base-url
       BOOTSTRAP_ADMIN_EMAIL: admin@platform.local
       BOOTSTRAP_ADMIN_PASSWORD: Admin12345!
       DEMO_UNIVERSITY_NAME: Демо Университет
@@ -191,10 +197,10 @@ services:
       APP__KAFKA__GROUP_ID: crypto-engine
       APP__KAFKA__INPUT_TOPIC: diplomas.raw_tasks
       APP__KAFKA__OUTPUT_TOPIC: diplomas.processing_results
-      APP__DATABASE__URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
+      APP__DATABASE__URL: *database-url
       APP__JWT__AUTH_HMAC_SECRET: gateway-share-secret
       APP__JWT__PAYLOAD_SECRET: XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI=
-      APP__APP__VERIFICATION_BASE_URL: http://localhost:80/verify?payload=
+      APP__APP__VERIFICATION_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:80}/verify?payload=
       APP__APP__ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       RUST_LOG: info,rdkafka=warn,sqlx=warn
 
@@ -212,7 +218,7 @@ services:
         condition: service_healthy
     environment:
       HTTP_ADDR: ':8080'
-      DATABASE_URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
+      DATABASE_URL: *database-url
       LOG_LEVEL: info
       JWT_ENC_SECRET: XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI=
       # Local development only: trust Docker bridge so X-Forwarded-For can be used to test GeoIP.

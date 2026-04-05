@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+echo "Warning: migrate-go.sh is deprecated for this repository. Use deploy/migrate.sh via db-migrate service." >&2
+
 if [ -z "${DATABASE_URL:-}" ]; then
   echo "DATABASE_URL is required" >&2
   exit 1

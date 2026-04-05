@@ -1,4 +1,4 @@
-CREATE TABLE batch_record_attributes (
+CREATE TABLE IF NOT EXISTS batch_record_attributes (
     batch_id     UUID NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
     record_index INTEGER NOT NULL,
     specialty    VARCHAR(255) NOT NULL,
@@ -10,4 +10,4 @@ CREATE TABLE batch_record_attributes (
     PRIMARY KEY (batch_id, record_index)
 );
 
-CREATE INDEX idx_batch_record_attributes_batch_id ON batch_record_attributes(batch_id);
+CREATE INDEX IF NOT EXISTS idx_batch_record_attributes_batch_id ON batch_record_attributes(batch_id);
