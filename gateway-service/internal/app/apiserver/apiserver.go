@@ -161,7 +161,7 @@ func (s *APIServer) configureRouter() error {
 	adminService := service.NewAdminService(s.db.Admin(), s.db.University(), hasher)
 	apiKeyService := service.NewAPIKeyService(s.db.APIKey())
 	signingKeyService := service.NewSigningKeyService(s.db.University(), s.db.SigningKey(), keyEncryptor)
-	diplomaService := service.NewDiplomaService(s.db.Diploma(), kafkaWriter, excelGenerator)
+	diplomaService := service.NewDiplomaService(s.db.Diploma(), s.db.SigningKey(), kafkaWriter, excelGenerator)
 	studentService := service.NewStudentService(s.db.Diploma(), tokenManager, qrGenerator, s.config.PublicBaseURL, s.config.ShareTokenTTL)
 	universityService := service.NewUniversityCabinetService(s.db.University(), s.db.Diploma())
 	analyticsService := service.NewAnalyticsService(s.db.Analytics())

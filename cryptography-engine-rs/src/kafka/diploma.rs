@@ -96,7 +96,15 @@ impl DiplomaProcessor {
     }
 
     async fn process_inner(&self, task: &DiplomaTask) -> AppResult<ProcessingResult> {
-        let key_data = get_university_key(&self.pool, task.vuz_id).await?;
+        let key_data = match get_university_key(&self.pool, task.vuz_id).await {
+            Ok(key_data) => key_data,
+            Err(AppError::Db(sqlx::Error::RowNotFound)) => {
+                return Err(AppError::Signing(
+                    "university signing key is not configured".to_string(),
+                ))
+            }
+            Err(err) => return Err(err),
+        };
         debug!(
             vuz_id = %task.vuz_id,
             key_algorithm = %key_data.key_algorithm,

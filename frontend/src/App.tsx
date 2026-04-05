@@ -2222,6 +2222,9 @@ function UniversityDashboard({
 	const [downloadState, setDownloadState] = useState<BatchDownloadState | null>(
 		null,
 	)
+	const signingKeyRequiredMessage =
+		'Сначала загрузите ключ подписи Ed25519 в разделе «Ключи и API». Без него система не примет дипломы в обработку.'
+	const signingKeyConfigured = Boolean(signingKeyStatus?.configured)
 
 	const activeBatch =
 		batches.find(batch => batch.id === trackedBatchId) ??
@@ -2411,6 +2414,11 @@ function UniversityDashboard({
 	}
 
 	const uploadDiplomas = async (values: { diplomas: DiplomaRecordInput[] }) => {
+		if (!signingKeyConfigured) {
+			message.warning(signingKeyRequiredMessage)
+			return
+		}
+
 		setUploadingMode('json')
 		try {
 			const payload = {
@@ -2442,6 +2450,11 @@ function UniversityDashboard({
 	}
 
 	const uploadCsv = async () => {
+		if (!signingKeyConfigured) {
+			message.warning(signingKeyRequiredMessage)
+			return
+		}
+
 		if (!csvFile) {
 			message.warning('Сначала выберите CSV-файл.')
 			return
@@ -2887,7 +2900,7 @@ function UniversityDashboard({
 													type='warning'
 													showIcon
 													message='Ключ подписи ещё не загружен'
-													description='Без него крипто-воркер не сможет выпустить QR payload.'
+													description='Сначала загрузите Ed25519 private key в разделе «Ключи и API». До этого загрузка дипломов заблокирована.'
 												/>
 											)}
 										</Card>
@@ -2919,6 +2932,15 @@ function UniversityDashboard({
 										initialValues={{ diplomas: [emptyRecord()] }}
 										onFinish={uploadDiplomas}
 									>
+										{!signingKeyConfigured && (
+											<Alert
+												type='warning'
+												showIcon
+												message='Загрузка дипломов временно заблокирована'
+												description={signingKeyRequiredMessage}
+												className='!mb-4'
+											/>
+										)}
 										<Form.List name='diplomas'>
 											{(fields, { add, remove }) => (
 												<Space direction='vertical' size={16} className='flex'>
@@ -3014,6 +3036,7 @@ function UniversityDashboard({
 															type='primary'
 															htmlType='submit'
 															icon={<SendOutlined />}
+															disabled={!signingKeyConfigured}
 															loading={uploadingMode === 'json'}
 														>
 															Отправить в обработку
@@ -3036,7 +3059,9 @@ function UniversityDashboard({
 										<Upload.Dragger
 											maxCount={1}
 											accept='.csv,text/csv,application/vnd.ms-excel'
-											disabled={uploadingMode === 'csv'}
+											disabled={
+												uploadingMode === 'csv' || !signingKeyConfigured
+											}
 											beforeUpload={file => {
 												setCsvFile(file)
 												return false
@@ -3053,6 +3078,7 @@ function UniversityDashboard({
 											type='primary'
 											icon={<FileExcelOutlined />}
 											onClick={() => void uploadCsv()}
+											disabled={!signingKeyConfigured}
 											loading={uploadingMode === 'csv'}
 										>
 											Отправить CSV

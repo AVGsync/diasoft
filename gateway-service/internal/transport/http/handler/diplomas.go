@@ -14,6 +14,7 @@ import (
 
 	"github.com/diasoft/gateway-service/internal/authctx"
 	"github.com/diasoft/gateway-service/internal/model"
+	"github.com/diasoft/gateway-service/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -65,6 +66,10 @@ func (h *DiplomaHandler) Upload() http.HandlerFunc {
 		response, err := h.diplomas.Upload(r.Context(), vuzID, records)
 		if err != nil {
 			slog.Error("failed to upload diplomas", "vuz_id", vuzID, "records_count", len(records), "error", err)
+			if errors.Is(err, service.ErrSigningKeyNotFound) {
+				writeError(w, http.StatusBadRequest, "Сначала загрузите ключ подписи Ed25519 в разделе «Ключи и API», затем повторите загрузку дипломов.")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed to upload diplomas")
 			return
 		}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"time"
 
@@ -16,6 +17,10 @@ type ExcelGenerator interface {
 	BuildBatch(rows []*model.BatchDownloadRow) ([]byte, error)
 }
 
+type SigningKeyStatusReader interface {
+	FindByVUZID(ctx context.Context, vuzID string) (*model.UniversitySigningKey, error)
+}
+
 type DiplomaRepository interface {
 	CreateBatchWithRecords(ctx context.Context, vuzID string, records []model.DiplomaUploadRecord) (*model.Batch, error)
 	FailBatch(ctx context.Context, batchID string) error
@@ -26,20 +31,29 @@ type DiplomaRepository interface {
 }
 
 type DiplomaService struct {
-	repo      DiplomaRepository
-	producer  RawTaskProducer
-	excelFile ExcelGenerator
+	repo        DiplomaRepository
+	signingKeys SigningKeyStatusReader
+	producer    RawTaskProducer
+	excelFile   ExcelGenerator
 }
 
-func NewDiplomaService(repo DiplomaRepository, producer RawTaskProducer, excelFile ExcelGenerator) *DiplomaService {
+func NewDiplomaService(repo DiplomaRepository, signingKeys SigningKeyStatusReader, producer RawTaskProducer, excelFile ExcelGenerator) *DiplomaService {
 	return &DiplomaService{
-		repo:      repo,
-		producer:  producer,
-		excelFile: excelFile,
+		repo:        repo,
+		signingKeys: signingKeys,
+		producer:    producer,
+		excelFile:   excelFile,
 	}
 }
 
 func (s *DiplomaService) Upload(ctx context.Context, vuzID string, records []model.DiplomaUploadRecord) (*model.BatchUploadResponse, error) {
+	if _, err := s.signingKeys.FindByVUZID(ctx, vuzID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrSigningKeyNotFound
+		}
+		return nil, err
+	}
+
 	batch, err := s.repo.CreateBatchWithRecords(ctx, vuzID, records)
 	if err != nil {
 		return nil, err

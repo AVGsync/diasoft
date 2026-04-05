@@ -131,7 +131,7 @@ func (g *Generator) BuildBatch(rows []*model.BatchDownloadRow) ([]byte, error) {
 			row.Faculty,
 			row.Year,
 			row.Status,
-			valueOrEmpty(row.Error),
+			humanizeBatchError(row.Error),
 		}
 
 		for column, value := range values {
@@ -195,4 +195,24 @@ func valueOrEmpty(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func humanizeBatchError(value *string) string {
+	raw := strings.TrimSpace(valueOrEmpty(value))
+	if raw == "" {
+		return ""
+	}
+
+	normalized := strings.ToLower(raw)
+	switch {
+	case strings.Contains(normalized, "no rows returned by a query that expected to return at least one row"),
+		strings.Contains(normalized, "signing key is not configured"),
+		strings.Contains(normalized, "university signing key is not configured"):
+		return "Ключ подписи вуза не настроен. Загрузите Ed25519 private key в разделе «Ключи и API» и повторите обработку."
+	case strings.Contains(normalized, "diploma number already exists with another hash"),
+		strings.Contains(normalized, "diploma number already exists"):
+		return "В реестре уже есть диплом с таким номером, но с другими данными. Проверьте запись и повторите загрузку."
+	default:
+		return raw
+	}
 }
