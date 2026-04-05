@@ -4,7 +4,9 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/diasoft/gateway-service/internal/app/apiserver"
@@ -84,6 +86,132 @@ func applyEnvOverrides(config *apiserver.Config) {
 	if value := os.Getenv("DEMO_UNIVERSITY_PRIVATE_KEY_PATH"); value != "" {
 		config.DemoUniversityPrivateKey = value
 	}
+	if value := os.Getenv("RATE_LIMIT_ENABLED"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			log.Fatalf("RATE_LIMIT_ENABLED must be a valid boolean: %v", err)
+		}
+		config.RateLimit.Enabled = parsed
+	}
+	if value := os.Getenv("RATE_LIMIT_KEY_TTL"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("RATE_LIMIT_KEY_TTL must be a valid duration: %v", err)
+		}
+		config.RateLimit.KeyTTL = parsed
+	}
+	if value := os.Getenv("TRUSTED_PROXY_CIDRS"); value != "" {
+		config.RateLimit.TrustedProxyCIDRs = splitAndTrim(value)
+	}
+	if value := os.Getenv("RATE_LIMIT_REDIS_ADDR"); value != "" {
+		config.RateLimit.Redis.Addr = value
+	}
+	if value := os.Getenv("RATE_LIMIT_REDIS_PASSWORD"); value != "" {
+		config.RateLimit.Redis.Password = value
+	}
+	if value := os.Getenv("RATE_LIMIT_REDIS_DB"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			log.Fatalf("RATE_LIMIT_REDIS_DB must be a valid integer: %v", err)
+		}
+		config.RateLimit.Redis.DB = parsed
+	}
+	if value := os.Getenv("RATE_LIMIT_REDIS_PREFIX"); value != "" {
+		config.RateLimit.Redis.KeyPrefix = value
+	}
+	if value := os.Getenv("RATE_LIMIT_REDIS_DIAL_TIMEOUT"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("RATE_LIMIT_REDIS_DIAL_TIMEOUT must be a valid duration: %v", err)
+		}
+		config.RateLimit.Redis.DialTimeout = parsed
+	}
+	if value := os.Getenv("RATE_LIMIT_REDIS_READ_TIMEOUT"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("RATE_LIMIT_REDIS_READ_TIMEOUT must be a valid duration: %v", err)
+		}
+		config.RateLimit.Redis.ReadTimeout = parsed
+	}
+	if value := os.Getenv("RATE_LIMIT_REDIS_WRITE_TIMEOUT"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("RATE_LIMIT_REDIS_WRITE_TIMEOUT must be a valid duration: %v", err)
+		}
+		config.RateLimit.Redis.WriteTimeout = parsed
+	}
+	if value := os.Getenv("CACHE_ENABLED"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			log.Fatalf("CACHE_ENABLED must be a valid boolean: %v", err)
+		}
+		config.Cache.Enabled = parsed
+	}
+	if value := os.Getenv("CACHE_ADMIN_STATS_TTL"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("CACHE_ADMIN_STATS_TTL must be a valid duration: %v", err)
+		}
+		config.Cache.AdminStatsTTL = parsed
+	}
+	if value := os.Getenv("CACHE_UNIVERSITIES_LIST_TTL"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("CACHE_UNIVERSITIES_LIST_TTL must be a valid duration: %v", err)
+		}
+		config.Cache.UniversitiesListTTL = parsed
+	}
+	if value := os.Getenv("CACHE_UNIVERSITY_PROFILE_TTL"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("CACHE_UNIVERSITY_PROFILE_TTL must be a valid duration: %v", err)
+		}
+		config.Cache.UniversityProfileTTL = parsed
+	}
+	if value := os.Getenv("CACHE_BATCH_STATUS_TTL"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("CACHE_BATCH_STATUS_TTL must be a valid duration: %v", err)
+		}
+		config.Cache.BatchStatusTTL = parsed
+	}
+	if value := os.Getenv("CACHE_REDIS_ADDR"); value != "" {
+		config.Cache.Redis.Addr = value
+	}
+	if value := os.Getenv("CACHE_REDIS_PASSWORD"); value != "" {
+		config.Cache.Redis.Password = value
+	}
+	if value := os.Getenv("CACHE_REDIS_DB"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			log.Fatalf("CACHE_REDIS_DB must be a valid integer: %v", err)
+		}
+		config.Cache.Redis.DB = parsed
+	}
+	if value := os.Getenv("CACHE_REDIS_PREFIX"); value != "" {
+		config.Cache.Redis.KeyPrefix = value
+	}
+	if value := os.Getenv("CACHE_REDIS_DIAL_TIMEOUT"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("CACHE_REDIS_DIAL_TIMEOUT must be a valid duration: %v", err)
+		}
+		config.Cache.Redis.DialTimeout = parsed
+	}
+	if value := os.Getenv("CACHE_REDIS_READ_TIMEOUT"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("CACHE_REDIS_READ_TIMEOUT must be a valid duration: %v", err)
+		}
+		config.Cache.Redis.ReadTimeout = parsed
+	}
+	if value := os.Getenv("CACHE_REDIS_WRITE_TIMEOUT"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			log.Fatalf("CACHE_REDIS_WRITE_TIMEOUT must be a valid duration: %v", err)
+		}
+		config.Cache.Redis.WriteTimeout = parsed
+	}
 	if value := os.Getenv("KAFKA_BROKERS"); value != "" {
 		config.Kafka.Brokers = splitAndTrim(value)
 	}
@@ -92,6 +220,12 @@ func applyEnvOverrides(config *apiserver.Config) {
 	}
 	if value := os.Getenv("KAFKA_RESULTS_TOPIC"); value != "" {
 		config.Kafka.ProcessingResultsTopic = value
+	}
+	if value := os.Getenv("KAFKA_VERIFICATION_EVENTS_TOPIC"); value != "" {
+		config.Kafka.VerificationEventsTopic = value
+	}
+	if value := os.Getenv("KAFKA_VERIFICATION_EVENTS_GROUP"); value != "" {
+		config.Kafka.VerificationEventsGroup = value
 	}
 	if value := os.Getenv("KAFKA_CONSUMER_GROUP"); value != "" {
 		config.Kafka.ConsumerGroup = value

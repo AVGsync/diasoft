@@ -129,6 +129,40 @@ export interface VerificationByPayloadResponse {
   revoked_at?: string | null;
 }
 
+export interface VerificationStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface VerificationTimeBucket {
+  date: string;
+  count: number;
+}
+
+export interface VerificationGeoPoint {
+  country?: string;
+  city?: string;
+  count: number;
+}
+
+export interface VerificationTopUniversity {
+  vuz_id?: string;
+  vuz_code?: string;
+  name?: string;
+  checks: number;
+}
+
+export interface VerificationStatsResponse {
+  from: string;
+  to: string;
+  total_checks: number;
+  unique_requesters: number;
+  statuses: VerificationStatusCount[];
+  timeseries: VerificationTimeBucket[];
+  geography: VerificationGeoPoint[];
+  top_universities?: VerificationTopUniversity[];
+}
+
 export interface DiplomaRecordInput {
   full_name: string;
   diploma_number: string;

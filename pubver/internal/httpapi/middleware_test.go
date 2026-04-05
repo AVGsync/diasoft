@@ -7,22 +7,42 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestWithRateLimitRejectsSecondRequestFromSameIP(t *testing.T) {
-	handler := withRateLimit(
+	redisServer := miniredis.RunT(t)
+	limiter, err := NewRateLimiter(
+		t.Context(),
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		RateLimitConfig{
-			Enabled:         true,
-			RequestsPerSec:  1,
-			Burst:           1,
-			VisitorTTL:      time.Minute,
-			CleanupInterval: time.Minute,
+			Enabled:           true,
+			VerifyRPS:         1,
+			VerifyBurst:       1,
+			SearchRPS:         1,
+			SearchBurst:       1,
+			KeyTTL:            time.Minute,
+			TrustedProxyCIDRs: nil,
+			Redis: RedisConfig{
+				Addr:         redisServer.Addr(),
+				KeyPrefix:    "test:pubver",
+				DialTimeout:  time.Second,
+				ReadTimeout:  time.Second,
+				WriteTimeout: time.Second,
+			},
 		},
-		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}),
 	)
+	if err != nil {
+		t.Fatalf("NewRateLimiter() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = limiter.Close()
+	})
+
+	handler := withRateLimit(limiter, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
 
 	firstRequest := httptest.NewRequest(http.MethodGet, "/api/v1/verify", nil)
 	firstRequest.RemoteAddr = "10.0.0.1:1234"
@@ -46,19 +66,37 @@ func TestWithRateLimitRejectsSecondRequestFromSameIP(t *testing.T) {
 }
 
 func TestWithRateLimitAllowsHealthzWithoutLimiting(t *testing.T) {
-	handler := withRateLimit(
+	redisServer := miniredis.RunT(t)
+	limiter, err := NewRateLimiter(
+		t.Context(),
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		RateLimitConfig{
-			Enabled:         true,
-			RequestsPerSec:  1,
-			Burst:           1,
-			VisitorTTL:      time.Minute,
-			CleanupInterval: time.Minute,
+			Enabled:           true,
+			VerifyRPS:         1,
+			VerifyBurst:       1,
+			SearchRPS:         1,
+			SearchBurst:       1,
+			KeyTTL:            time.Minute,
+			TrustedProxyCIDRs: nil,
+			Redis: RedisConfig{
+				Addr:         redisServer.Addr(),
+				KeyPrefix:    "test:pubver",
+				DialTimeout:  time.Second,
+				ReadTimeout:  time.Second,
+				WriteTimeout: time.Second,
+			},
 		},
-		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}),
 	)
+	if err != nil {
+		t.Fatalf("NewRateLimiter() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = limiter.Close()
+	})
+
+	handler := withRateLimit(limiter, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
 
 	for i := 0; i < 3; i++ {
 		request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -68,5 +106,41 @@ func TestWithRateLimitAllowsHealthzWithoutLimiting(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("healthz status = %d, want %d", response.Code, http.StatusOK)
 		}
+	}
+}
+
+func TestExtractClientIPIgnoresSpoofedForwardedHeadersWithoutTrustedProxy(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	limiter, err := NewRateLimiter(
+		t.Context(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		RateLimitConfig{
+			Enabled:     true,
+			VerifyRPS:   1,
+			VerifyBurst: 1,
+			SearchRPS:   1,
+			SearchBurst: 1,
+			KeyTTL:      time.Minute,
+			Redis: RedisConfig{
+				Addr:         redisServer.Addr(),
+				KeyPrefix:    "test:pubver",
+				DialTimeout:  time.Second,
+				ReadTimeout:  time.Second,
+				WriteTimeout: time.Second,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewRateLimiter() error = %v", err)
+	}
+	t.Cleanup(func() { _ = limiter.Close() })
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/verify", nil)
+	request.RemoteAddr = "10.0.0.1:1234"
+	request.Header.Set("X-Forwarded-For", "198.51.100.10")
+
+	clientIP := limiter.extractClientIP(request)
+	if clientIP != "10.0.0.1" {
+		t.Fatalf("extractClientIP() = %q, want %q", clientIP, "10.0.0.1")
 	}
 }

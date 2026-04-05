@@ -26,8 +26,36 @@ type Config struct {
 	DemoUniversityEmail       string             `toml:"demo_university_email"`
 	DemoUniversityPassword    string             `toml:"demo_university_password"`
 	DemoUniversityPrivateKey  string             `toml:"demo_university_private_key_path"`
+	RateLimit                 *RateLimitConfig   `toml:"rate_limit"`
+	Cache                     *CacheConfig       `toml:"cache"`
 	DB                        *postgres.Config   `toml:"db"`
 	Kafka                     *kafkainfra.Config `toml:"kafka"`
+}
+
+type RateLimitConfig struct {
+	Enabled           bool          `toml:"enabled"`
+	KeyTTL            time.Duration `toml:"key_ttl"`
+	TrustedProxyCIDRs []string      `toml:"trusted_proxy_cidrs"`
+	Redis             *RedisConfig  `toml:"redis"`
+}
+
+type RedisConfig struct {
+	Addr         string        `toml:"addr"`
+	Password     string        `toml:"password"`
+	DB           int           `toml:"db"`
+	KeyPrefix    string        `toml:"key_prefix"`
+	DialTimeout  time.Duration `toml:"dial_timeout"`
+	ReadTimeout  time.Duration `toml:"read_timeout"`
+	WriteTimeout time.Duration `toml:"write_timeout"`
+}
+
+type CacheConfig struct {
+	Enabled              bool          `toml:"enabled"`
+	AdminStatsTTL        time.Duration `toml:"admin_stats_ttl"`
+	UniversitiesListTTL  time.Duration `toml:"universities_list_ttl"`
+	UniversityProfileTTL time.Duration `toml:"university_profile_ttl"`
+	BatchStatusTTL       time.Duration `toml:"batch_status_ttl"`
+	Redis                *RedisConfig  `toml:"redis"`
 }
 
 func NewConfig() *Config {
@@ -50,7 +78,37 @@ func NewConfig() *Config {
 		DemoUniversityEmail:       "demo.vuz@platform.local",
 		DemoUniversityPassword:    "University123!",
 		DemoUniversityPrivateKey:  "",
-		DB:                        postgres.NewConfig(),
-		Kafka:                     kafkainfra.NewConfig(),
+		RateLimit: &RateLimitConfig{
+			Enabled:           true,
+			KeyTTL:            15 * time.Minute,
+			TrustedProxyCIDRs: nil,
+			Redis: &RedisConfig{
+				Addr:         "localhost:6379",
+				Password:     "",
+				DB:           0,
+				KeyPrefix:    "rl:gateway",
+				DialTimeout:  3 * time.Second,
+				ReadTimeout:  2 * time.Second,
+				WriteTimeout: 2 * time.Second,
+			},
+		},
+		Cache: &CacheConfig{
+			Enabled:              false,
+			AdminStatsTTL:        30 * time.Second,
+			UniversitiesListTTL:  1 * time.Minute,
+			UniversityProfileTTL: 5 * time.Minute,
+			BatchStatusTTL:       15 * time.Second,
+			Redis: &RedisConfig{
+				Addr:         "localhost:6379",
+				Password:     "",
+				DB:           0,
+				KeyPrefix:    "cache:gateway",
+				DialTimeout:  3 * time.Second,
+				ReadTimeout:  2 * time.Second,
+				WriteTimeout: 2 * time.Second,
+			},
+		},
+		DB:    postgres.NewConfig(),
+		Kafka: kafkainfra.NewConfig(),
 	}
 }

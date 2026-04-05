@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"pubver/internal/analytics"
 	"pubver/internal/domain"
+	"pubver/pkg/verifyhash"
 )
 
 type verificationService interface {
@@ -18,23 +20,23 @@ type verificationService interface {
 	Search(ctx context.Context, vuzCode, diplomaNumber string) (domain.SearchResponse, error)
 }
 
-type RateLimitConfig struct {
-	Enabled         bool
-	RequestsPerSec  float64
-	Burst           int
-	VisitorTTL      time.Duration
-	CleanupInterval time.Duration
+type analyticsTracker interface {
+	Track(event analytics.VerificationEvent)
 }
 
 type Router struct {
-	logger  *slog.Logger
-	service verificationService
+	logger    *slog.Logger
+	service   verificationService
+	limiter   *RateLimiter
+	analytics analyticsTracker
 }
 
-func NewRouter(logger *slog.Logger, requestTimeout time.Duration, rateLimitConfig RateLimitConfig, verificationService verificationService) http.Handler {
+func NewRouter(logger *slog.Logger, requestTimeout time.Duration, limiter *RateLimiter, tracker analyticsTracker, verificationService verificationService) http.Handler {
 	handler := &Router{
-		logger:  logger,
-		service: verificationService,
+		logger:    logger,
+		service:   verificationService,
+		limiter:   limiter,
+		analytics: tracker,
 	}
 
 	mux := http.NewServeMux()
@@ -43,9 +45,7 @@ func NewRouter(logger *slog.Logger, requestTimeout time.Duration, rateLimitConfi
 	mux.HandleFunc("GET /api/v1/verify/search", handler.search)
 
 	httpHandler := http.Handler(mux)
-	if rateLimitConfig.Enabled {
-		httpHandler = withRateLimit(logger, rateLimitConfig, httpHandler)
-	}
+	httpHandler = withRateLimit(limiter, httpHandler)
 
 	return withRequestTimeout(
 		requestTimeout,
@@ -66,6 +66,7 @@ func (h *Router) verify(w http.ResponseWriter, r *http.Request) {
 	payload := strings.TrimSpace(r.URL.Query().Get("payload"))
 
 	response, err := h.service.VerifyPayload(r.Context(), payload)
+	h.trackVerify(r, payload, response, err)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -79,6 +80,7 @@ func (h *Router) search(w http.ResponseWriter, r *http.Request) {
 	vuzCode := strings.TrimSpace(r.URL.Query().Get("vuz_code"))
 
 	response, err := h.service.Search(r.Context(), vuzCode, diplomaNumber)
+	h.trackSearch(r, vuzCode, response, err)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -120,4 +122,90 @@ func withRequestTimeout(timeout time.Duration, next http.Handler) http.Handler {
 		defer cancel()
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (h *Router) trackVerify(r *http.Request, payload string, response domain.VerifyResponse, err error) {
+	if h.analytics == nil {
+		return
+	}
+
+	event := analytics.VerificationEvent{
+		CreatedAt:   time.Now().UTC(),
+		Source:      "pubver",
+		Endpoint:    "verify",
+		RequestID:   requestIDFromContext(r.Context()),
+		ClientIP:    h.clientIP(r),
+		UserAgent:   r.UserAgent(),
+		DiplomaHash: response.Hash,
+	}
+
+	if claimsMap, decodeErr := verifyhash.DecodeUnverifiedJWT(payload); decodeErr == nil {
+		if vuzID, extractErr := verifyhash.ExtractVUZIDFromMap(claimsMap); extractErr == nil {
+			event.VUZID = vuzID
+		}
+		if outerClaims, outerErr := verifyhash.ExtractOuterQRClaimsFromMap(claimsMap); outerErr == nil && event.DiplomaHash == "" {
+			event.DiplomaHash = outerClaims.DiplomaHash
+		}
+	}
+
+	switch {
+	case err == nil:
+		event.Valid = response.Valid
+		event.Status = string(response.Status)
+		if response.VUZCode != "" {
+			event.VUZCode = response.VUZCode
+		}
+	case errors.Is(err, domain.ErrInvalidInput):
+		event.Status = "invalid_input"
+	case errors.Is(err, domain.ErrInvalidPayload):
+		event.Status = "invalid_payload"
+	default:
+		event.Status = "internal_error"
+	}
+
+	h.analytics.Track(event)
+}
+
+func (h *Router) trackSearch(r *http.Request, vuzCode string, response domain.SearchResponse, err error) {
+	if h.analytics == nil {
+		return
+	}
+
+	event := analytics.VerificationEvent{
+		CreatedAt: time.Now().UTC(),
+		Source:    "pubver",
+		Endpoint:  "search",
+		RequestID: requestIDFromContext(r.Context()),
+		ClientIP:  h.clientIP(r),
+		UserAgent: r.UserAgent(),
+		VUZCode:   vuzCode,
+	}
+
+	switch {
+	case err == nil:
+		event.Valid = response.Valid
+		event.Status = string(response.Status)
+		if response.VUZCode != "" {
+			event.VUZCode = response.VUZCode
+		}
+	case errors.Is(err, domain.ErrInvalidInput):
+		event.Status = "invalid_input"
+	case errors.Is(err, domain.ErrInvalidPayload):
+		event.Status = "invalid_payload"
+	default:
+		event.Status = "internal_error"
+	}
+
+	h.analytics.Track(event)
+}
+
+func (h *Router) clientIP(r *http.Request) string {
+	if h.limiter != nil {
+		return h.limiter.extractClientIP(r)
+	}
+
+	if addr, ok := parseIP(r.RemoteAddr); ok {
+		return addr.String()
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }

@@ -1,7 +1,10 @@
 x-build-proxy: &build-proxy
   BUILD_HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
   BUILD_HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
-  BUILD_NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,::1,postgres,kafka,gateway-service,pubver,frontend}
+  BUILD_NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,::1,postgres,kafka,redis,gateway-service,pubver,frontend}
+  HTTP_PROXY: http://http.docker.internal:3128
+  HTTPS_PROXY: http://http.docker.internal:3128
+  NO_PROXY: localhost,127.0.0.1,::1,postgres,kafka,redis,gateway-service,pubver,frontend
 
 services:
   postgres:
@@ -11,13 +14,13 @@ services:
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: gateway_user
-      POSTGRES_PASSWORD:    
+      POSTGRES_PASSWORD:
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gateway_user -d postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U gateway_user -d postgres']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -27,7 +30,7 @@ services:
     container_name: diasoft-kafka
     restart: unless-stopped
     ports:
-      - "9092:9092"
+      - '9092:9092'
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -43,7 +46,11 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      test:
+        [
+          'CMD-SHELL',
+          '/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1',
+        ]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -58,8 +65,9 @@ services:
       - -ec
       - >
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.raw_tasks --partitions 1 --replication-factor 1 &&
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.processing_results --partitions 1 --replication-factor 1
-    restart: "no"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic diplomas.processing_results --partitions 1 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic verification.events --partitions 1 --replication-factor 1
+    restart: 'no'
 
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
@@ -69,11 +77,32 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8081:8080"
+      - '8081:8080'
     environment:
-      DYNAMIC_CONFIG_ENABLED: "true"
+      DYNAMIC_CONFIG_ENABLED: 'true'
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+
+  redis:
+    image: redis:7-alpine
+    container_name: diasoft-redis
+    restart: unless-stopped
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--requirepass',
+        'diasoft-rate-limit-secret',
+      ]
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'redis-cli -a diasoft-rate-limit-secret ping | grep PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   db-migrate:
     build:
@@ -88,7 +117,7 @@ services:
       DATABASE_URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
     volumes:
       - .:/workspace:ro
-    restart: "no"
+    restart: 'no'
 
   gateway-service:
     build:
@@ -102,9 +131,11 @@ services:
         condition: service_completed_successfully
       kafka-init:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     environment:
-      BIND_ADDR: ":8080"
-      LOG_LEVEL: "debug"
+      BIND_ADDR: ':8080'
+      LOG_LEVEL: 'debug'
       DATABASE_URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
       JWT_SECRET: gateway-access-secret
       SHARE_JWT_SECRET: gateway-share-secret
@@ -115,19 +146,36 @@ services:
       BOOTSTRAP_ADMIN_PASSWORD: Admin12345!
       DEMO_UNIVERSITY_NAME: Демо Университет
       DEMO_UNIVERSITY_VUZ_CODE: DEMO2026
-      DEMO_UNIVERSITY_INN: "7701234567"
-      DEMO_UNIVERSITY_OGRN: "1027700123456"
+      DEMO_UNIVERSITY_INN: '7701234567'
+      DEMO_UNIVERSITY_OGRN: '1027700123456'
       DEMO_UNIVERSITY_EMAIL: demo.vuz@platform.local
       DEMO_UNIVERSITY_PASSWORD: University123!
       DEMO_UNIVERSITY_PRIVATE_KEY_PATH: /run/secrets/demo_university_private_key.pem
       KAFKA_BROKERS: kafka:29092
       KAFKA_RAW_TOPIC: diplomas.raw_tasks
       KAFKA_RESULTS_TOPIC: diplomas.processing_results
+      KAFKA_VERIFICATION_EVENTS_TOPIC: verification.events
+      KAFKA_VERIFICATION_EVENTS_GROUP: gateway-service-verifications
       KAFKA_CONSUMER_GROUP: gateway-service
+      RATE_LIMIT_ENABLED: 'true'
+      RATE_LIMIT_KEY_TTL: 15m
+      RATE_LIMIT_REDIS_ADDR: redis:6379
+      RATE_LIMIT_REDIS_PASSWORD: diasoft-rate-limit-secret
+      RATE_LIMIT_REDIS_DB: '0'
+      RATE_LIMIT_REDIS_PREFIX: rl:gateway
+      CACHE_ENABLED: 'true'
+      CACHE_ADMIN_STATS_TTL: 30s
+      CACHE_UNIVERSITIES_LIST_TTL: 1m
+      CACHE_UNIVERSITY_PROFILE_TTL: 5m
+      CACHE_BATCH_STATUS_TTL: 15s
+      CACHE_REDIS_ADDR: redis:6379
+      CACHE_REDIS_PASSWORD: diasoft-rate-limit-secret
+      CACHE_REDIS_DB: '0'
+      CACHE_REDIS_PREFIX: cache:gateway
     volumes:
       - ./deploy/demo/demo_university_ed25519_private_key.pem:/run/secrets/demo_university_private_key.pem:ro
     ports:
-      - "8080:8080"
+      - '8080:8080'
 
   cryptography-engine-rs:
     build:
@@ -163,13 +211,44 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     environment:
-      HTTP_ADDR: ":8080"
+      HTTP_ADDR: ':8080'
       DATABASE_URL: postgres://gateway_user:gateway_password@postgres:5432/postgres?sslmode=disable
       LOG_LEVEL: info
       JWT_ENC_SECRET: XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI=
+      # Local development only: trust Docker bridge so X-Forwarded-For can be used to test GeoIP.
+      TRUSTED_PROXY_CIDRS: 127.0.0.1/32,172.16.0.0/12
+      RATE_LIMIT_ENABLED: 'true'
+      RATE_LIMIT_VERIFY_RPS: '0.25'
+      RATE_LIMIT_VERIFY_BURST: '5'
+      RATE_LIMIT_SEARCH_RPS: '0.1'
+      RATE_LIMIT_SEARCH_BURST: '3'
+      RATE_LIMIT_KEY_TTL: 15m
+      RATE_LIMIT_REDIS_ADDR: redis:6379
+      RATE_LIMIT_REDIS_PASSWORD: diasoft-rate-limit-secret
+      RATE_LIMIT_REDIS_DB: '0'
+      RATE_LIMIT_REDIS_PREFIX: rl:pubver
+      ANALYTICS_ENABLED: 'true'
+      ANALYTICS_KAFKA_BROKERS: kafka:29092
+      ANALYTICS_KAFKA_TOPIC: verification.events
+      ANALYTICS_KAFKA_CLIENT_ID: pubver-analytics
+      ANALYTICS_KAFKA_WRITE_TIMEOUT: 3s
+      ANALYTICS_QUEUE_SIZE: '1024'
+      ANALYTICS_GEOIP_DB_PATH: /app/geoip/GeoLite2-City.mmdb
+      CACHE_ENABLED: 'true'
+      CACHE_UNIVERSITY_KEY_TTL: 30m
+      CACHE_DIPLOMA_BY_HASH_TTL: 1m
+      CACHE_DIPLOMA_SEARCH_TTL: 1m
+      CACHE_REDIS_ADDR: redis:6379
+      CACHE_REDIS_PASSWORD: diasoft-rate-limit-secret
+      CACHE_REDIS_DB: '0'
+      CACHE_REDIS_PREFIX: cache:pubver
+    volumes:
+      - ./geoip:/app/geoip:ro
     ports:
-      - "8082:8080"
+      - '8082:8080'
 
   frontend:
     build:
@@ -184,7 +263,7 @@ services:
       pubver:
         condition: service_started
     ports:
-      - "80:80"
+      - '80:80'
 
 volumes:
   postgres_data:

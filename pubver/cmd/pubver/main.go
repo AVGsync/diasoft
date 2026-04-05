@@ -10,8 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"pubver/internal/analytics"
 	"pubver/internal/config"
 	"pubver/internal/httpapi"
+	"pubver/internal/rediscache"
 	"pubver/internal/repository"
 	"pubver/internal/repository/postgres"
 	"pubver/internal/service"
@@ -34,7 +36,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	repo, cleanup, err := newVerificationRepository(ctx, cfg)
+	repo, cleanup, err := newVerificationRepository(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("build repository", "error", err)
 		os.Exit(1)
@@ -43,18 +45,68 @@ func main() {
 
 	verificationService := service.NewVerificationService(repo, logger, cfg.JWTEncKey)
 
+	var analyticsTracker analytics.Tracker
+	if cfg.Analytics.Enabled {
+		var geoResolver analytics.GeoResolver
+		if cfg.Analytics.GeoIPDBPath != "" {
+			geoResolver, err = analytics.NewMaxMindGeoResolver(cfg.Analytics.GeoIPDBPath)
+			if err != nil {
+				logger.Warn("geo resolver disabled", "path", cfg.Analytics.GeoIPDBPath, "error", err)
+			}
+		}
+
+		analyticsTracker = analytics.NewKafkaTracker(logger, analytics.KafkaConfig{
+			Brokers:      cfg.Analytics.KafkaBrokers,
+			Topic:        cfg.Analytics.KafkaTopic,
+			ClientID:     cfg.Analytics.ClientID,
+			WriteTimeout: cfg.Analytics.WriteTimeout,
+			QueueSize:    cfg.Analytics.QueueSize,
+		}, geoResolver)
+		defer func() {
+			if err := analyticsTracker.Close(); err != nil {
+				logger.Warn("close analytics tracker", "error", err)
+			}
+		}()
+	}
+
+	var rateLimiter *httpapi.RateLimiter
+	if cfg.RateLimit.Enabled {
+		rateLimiter, err = httpapi.NewRateLimiter(ctx, logger, httpapi.RateLimitConfig{
+			Enabled:           cfg.RateLimit.Enabled,
+			VerifyRPS:         cfg.RateLimit.VerifyRPS,
+			VerifyBurst:       cfg.RateLimit.VerifyBurst,
+			SearchRPS:         cfg.RateLimit.SearchRPS,
+			SearchBurst:       cfg.RateLimit.SearchBurst,
+			KeyTTL:            cfg.RateLimit.KeyTTL,
+			TrustedProxyCIDRs: cfg.RateLimit.TrustedProxyCIDRs,
+			Redis: httpapi.RedisConfig{
+				Addr:         cfg.RateLimit.Redis.Addr,
+				Password:     cfg.RateLimit.Redis.Password,
+				DB:           cfg.RateLimit.Redis.DB,
+				KeyPrefix:    cfg.RateLimit.Redis.KeyPrefix,
+				DialTimeout:  cfg.RateLimit.Redis.DialTimeout,
+				ReadTimeout:  cfg.RateLimit.Redis.ReadTimeout,
+				WriteTimeout: cfg.RateLimit.Redis.WriteTimeout,
+			},
+		})
+		if err != nil {
+			logger.Error("build rate limiter", "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			if err := rateLimiter.Close(); err != nil {
+				logger.Warn("close rate limiter", "error", err)
+			}
+		}()
+	}
+
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(
 			logger,
 			cfg.RequestTimeout,
-			httpapi.RateLimitConfig{
-				Enabled:         cfg.RateLimit.Enabled,
-				RequestsPerSec:  cfg.RateLimit.RequestsPerSec,
-				Burst:           cfg.RateLimit.Burst,
-				VisitorTTL:      cfg.RateLimit.VisitorTTL,
-				CleanupInterval: cfg.RateLimit.CleanupInterval,
-			},
+			rateLimiter,
+			analyticsTracker,
 			verificationService,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -91,13 +143,45 @@ func main() {
 	logger.Info("public verification api stopped")
 }
 
-func newVerificationRepository(ctx context.Context, cfg config.Config) (repository.VerificationRepository, func(), error) {
+func newVerificationRepository(ctx context.Context, cfg config.Config, logger *slog.Logger) (repository.VerificationRepository, func(), error) {
 	pool, err := newDBPool(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return postgres.NewVerificationRepository(pool), pool.Close, nil
+	baseRepository := postgres.NewVerificationRepository(pool)
+	cleanup := func() {
+		pool.Close()
+	}
+
+	if !cfg.Cache.Enabled {
+		return baseRepository, cleanup, nil
+	}
+
+	cacheClient, err := rediscache.New(ctx, rediscache.Config{
+		Addr:         cfg.Cache.Redis.Addr,
+		Password:     cfg.Cache.Redis.Password,
+		DB:           cfg.Cache.Redis.DB,
+		KeyPrefix:    cfg.Cache.Redis.KeyPrefix,
+		DialTimeout:  cfg.Cache.Redis.DialTimeout,
+		ReadTimeout:  cfg.Cache.Redis.ReadTimeout,
+		WriteTimeout: cfg.Cache.Redis.WriteTimeout,
+	})
+	if err != nil {
+		pool.Close()
+		return nil, nil, err
+	}
+
+	cleanup = func() {
+		_ = cacheClient.Close()
+		pool.Close()
+	}
+
+	return repository.NewCachedVerificationRepository(baseRepository, cacheClient, logger, repository.CacheConfig{
+		UniversityKeyTTL:       cfg.Cache.UniversityKeyTTL,
+		DiplomaRecordByHashTTL: cfg.Cache.DiplomaRecordByHashTTL,
+		DiplomaSearchResultTTL: cfg.Cache.DiplomaSearchResultTTL,
+	}), cleanup, nil
 }
 
 func newLogger(level string) *slog.Logger {
