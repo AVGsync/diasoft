@@ -14,12 +14,14 @@ ENV HTTP_PROXY=${BUILD_HTTP_PROXY} \
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN go mod download
-
+COPY vendor ./vendor
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/gateway-service ./cmd/apiserver
+
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /out/gateway-service ./cmd/apiserver
 
 FROM alpine:3.22
+
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 WORKDIR /app
 

@@ -125,8 +125,8 @@ services:
   gateway-service:
     build:
       context: ./gateway-service
-      args:
-        <<: *build-proxy
+      extra_hosts:
+        - "http.docker.internal:host-gateway"
     container_name: diasoft-gateway-service
     restart: unless-stopped
     depends_on:
@@ -183,8 +183,8 @@ services:
   cryptography-engine-rs:
     build:
       context: ./cryptography-engine-rs
-      args:
-        <<: *build-proxy
+      extra_hosts:
+        - "http.docker.internal:host-gateway"
     container_name: diasoft-cryptography-engine
     restart: unless-stopped
     depends_on:
@@ -207,8 +207,8 @@ services:
   pubver:
     build:
       context: ./pubver
-      args:
-        <<: *build-proxy
+      extra_hosts:
+        - "http.docker.internal:host-gateway"
     container_name: diasoft-pubver
     restart: unless-stopped
     depends_on:
@@ -256,8 +256,8 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        <<: *build-proxy
+      extra_hosts:
+        - "http.docker.internal:host-gateway"
     container_name: diasoft-frontend
     restart: unless-stopped
     depends_on:
