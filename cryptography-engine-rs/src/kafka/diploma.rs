@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use sqlx::PgPool;
+use sqlx::Row;
 use tracing::{debug, info, warn, error};
 
 use crate::config::AppConfig;
@@ -42,7 +43,7 @@ impl DiplomaProcessor {
             "Processing diploma task"
         );
 
-        match self.process_inner(&task).await {
+        let result = match self.process_inner(&task).await {
             Ok(result) => {
                 if result.status == ProcessingStatus::Ok {
                     info!(
@@ -59,16 +60,7 @@ impl DiplomaProcessor {
                         "Diploma processing failed"
                     );
                 }
-                
-                self.producer.send_result(&result).await.map_err(|e| {
-                    error!(
-                        batch_id = %task.batch_id,
-                        record_index = task.record_index,
-                        error = %e,
-                        "Failed to send processing result to Kafka"
-                    );
-                    e
-                })?;
+                result
             }
             Err(e) => {
                 error!(
@@ -84,18 +76,20 @@ impl DiplomaProcessor {
                     task.record_index,
                     e.to_string(),
                 );
-                
-                self.producer.send_result(&error_result).await.map_err(|send_error| {
-                    error!(
-                        batch_id = %task.batch_id,
-                        record_index = task.record_index,
-                        error = %send_error,
-                        processing_error = %e,
-                        "Failed to send error result to Kafka"
-                    );
-                    send_error
-                })?;
+
+                error_result
             }
+        };
+
+        self.persist_processing_result(&result).await?;
+
+        if let Err(e) = self.producer.send_result(&result).await {
+            warn!(
+                batch_id = %task.batch_id,
+                record_index = task.record_index,
+                error = %e,
+                "Failed to send processing result to Kafka, but database state is already updated"
+            );
         }
 
         Ok(())
@@ -242,6 +236,123 @@ impl DiplomaProcessor {
         }
 
         Ok(key_bytes)
+    }
+
+    async fn persist_processing_result(&self, result: &ProcessingResult) -> AppResult<()> {
+        let mut tx = self.pool.begin().await?;
+
+        let existing_row = sqlx::query(
+            r#"
+            SELECT status
+            FROM batch_results
+            WHERE batch_id = $1 AND record_index = $2
+            FOR UPDATE
+            "#,
+        )
+        .bind(result.batch_id)
+        .bind(result.record_index as i32)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if existing_row.is_some() {
+            debug!(
+                batch_id = %result.batch_id,
+                record_index = result.record_index,
+                "Batch result already persisted, skipping direct database write"
+            );
+            tx.commit().await?;
+            return Ok(());
+        }
+
+        match &result.status {
+            ProcessingStatus::Ok => {
+                sqlx::query(
+                    r#"
+                    INSERT INTO batch_results (batch_id, record_index, diploma_hash, qr_payload, status, error)
+                    VALUES ($1, $2, $3, $4, 'ok', NULL)
+                    "#,
+                )
+                .bind(result.batch_id)
+                .bind(result.record_index as i32)
+                .bind(&result.diploma_hash)
+                .bind(result.qr_payload.as_deref())
+                .execute(&mut *tx)
+                .await?;
+            }
+            ProcessingStatus::Error => {
+                sqlx::query(
+                    r#"
+                    INSERT INTO batch_results (batch_id, record_index, diploma_hash, qr_payload, status, error)
+                    VALUES ($1, $2, NULL, NULL, 'error', $3)
+                    "#,
+                )
+                .bind(result.batch_id)
+                .bind(result.record_index as i32)
+                .bind(result.error.as_deref().unwrap_or("processing error"))
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE batches
+            SET processed_records = processed_records + 1
+            WHERE id = $1
+            "#,
+        )
+        .bind(result.batch_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let batch_row = sqlx::query(
+            r#"
+            SELECT
+                total_records,
+                processed_records,
+                (
+                    SELECT COUNT(*)
+                    FROM batch_results
+                    WHERE batch_id = $1 AND status = 'error'
+                ) AS error_count
+            FROM batches
+            WHERE id = $1
+            "#,
+        )
+        .bind(result.batch_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let total_records: i32 = batch_row.try_get("total_records")?;
+        let processed_records: i32 = batch_row.try_get("processed_records")?;
+        let error_count: i64 = batch_row.try_get("error_count")?;
+
+        if processed_records >= total_records {
+            let final_status = if error_count > 0 { "failed" } else { "completed" };
+
+            sqlx::query(
+                r#"
+                UPDATE batches
+                SET status = $2, completed_at = COALESCE(completed_at, NOW())
+                WHERE id = $1
+                "#,
+            )
+            .bind(result.batch_id)
+            .bind(final_status)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        info!(
+            batch_id = %result.batch_id,
+            record_index = result.record_index,
+            status = ?result.status,
+            "Persisted processing result directly to database"
+        );
+
+        Ok(())
     }
 }
 
