@@ -196,8 +196,10 @@ impl DiplomaProcessor {
             Aes256Gcm, KeyInit, Nonce,
         };
 
-        let master_key = self.config.app.encryption_key.as_ref()
-            .ok_or_else(|| AppError::Encryption("master encryption key not configured".into()))?;
+        let master_key = self.config.app.encryption_key.trim();
+        if master_key.is_empty() {
+            return Err(AppError::Encryption("master encryption key not configured".into()));
+        }
 
         let key_bytes = BASE64.decode(master_key)
             .map_err(|e| AppError::Encryption(format!("invalid master key format: {}", e)))?;

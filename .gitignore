@@ -3,6 +3,8 @@
 
 # Service files
 .env
+.env.machine
+.env.infisical
 agents.md
 
 # Compiled binaries

@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +29,12 @@ func main() {
 	}
 
 	applyEnvOverrides(config)
+	if err := applySharedEnvFallbacks(config); err != nil {
+		log.Fatal(err)
+	}
+	if err := config.Validate(); err != nil {
+		log.Fatal(err)
+	}
 
 	server := apiserver.New(config)
 	if err := server.Start(); err != nil {
@@ -230,6 +238,59 @@ func applyEnvOverrides(config *apiserver.Config) {
 	if value := os.Getenv("KAFKA_CONSUMER_GROUP"); value != "" {
 		config.Kafka.ConsumerGroup = value
 	}
+}
+
+func applySharedEnvFallbacks(config *apiserver.Config) error {
+	if strings.TrimSpace(config.DB.DatabaseURL) == "" {
+		databaseURL, err := buildDatabaseURLFromEnv()
+		if err != nil {
+			return err
+		}
+		config.DB.DatabaseURL = databaseURL
+	}
+
+	if redisPassword := strings.TrimSpace(os.Getenv("REDIS_PASSWORD")); redisPassword != "" {
+		if strings.TrimSpace(os.Getenv("RATE_LIMIT_REDIS_PASSWORD")) == "" {
+			config.RateLimit.Redis.Password = redisPassword
+		}
+		if strings.TrimSpace(os.Getenv("CACHE_REDIS_PASSWORD")) == "" {
+			config.Cache.Redis.Password = redisPassword
+		}
+	}
+
+	return nil
+}
+
+func buildDatabaseURLFromEnv() (string, error) {
+	host := strings.TrimSpace(os.Getenv("POSTGRES_HOST"))
+	database := strings.TrimSpace(os.Getenv("POSTGRES_DB"))
+	user := strings.TrimSpace(os.Getenv("POSTGRES_USER"))
+	if host == "" || database == "" || user == "" {
+		return "", nil
+	}
+
+	port := strings.TrimSpace(os.Getenv("POSTGRES_PORT"))
+	if port == "" {
+		port = "5432"
+	}
+	password := os.Getenv("POSTGRES_PASSWORD")
+	sslMode := strings.TrimSpace(os.Getenv("POSTGRES_SSLMODE"))
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+
+	connectionURL := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, password),
+		Host:   net.JoinHostPort(host, port),
+		Path:   database,
+	}
+
+	query := connectionURL.Query()
+	query.Set("sslmode", sslMode)
+	connectionURL.RawQuery = query.Encode()
+
+	return connectionURL.String(), nil
 }
 
 func splitAndTrim(value string) []string {

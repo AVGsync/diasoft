@@ -124,7 +124,7 @@ func Load() (Config, error) {
 			SearchBurst: searchBurst,
 			Redis: RedisConfig{
 				Addr:         strings.TrimSpace(os.Getenv("RATE_LIMIT_REDIS_ADDR")),
-				Password:     os.Getenv("RATE_LIMIT_REDIS_PASSWORD"),
+				Password:     envOrDefault("RATE_LIMIT_REDIS_PASSWORD", os.Getenv("REDIS_PASSWORD")),
 				DB:           redisDB,
 				KeyPrefix:    strings.TrimSpace(envOrDefault("RATE_LIMIT_REDIS_PREFIX", "rl:pubver")),
 				DialTimeout:  3 * time.Second,
@@ -137,7 +137,7 @@ func Load() (Config, error) {
 			Enabled: cacheEnabled,
 			Redis: RedisConfig{
 				Addr:         strings.TrimSpace(envOrDefault("CACHE_REDIS_ADDR", os.Getenv("RATE_LIMIT_REDIS_ADDR"))),
-				Password:     envOrDefault("CACHE_REDIS_PASSWORD", os.Getenv("RATE_LIMIT_REDIS_PASSWORD")),
+				Password:     envOrDefault("CACHE_REDIS_PASSWORD", envOrDefault("RATE_LIMIT_REDIS_PASSWORD", os.Getenv("REDIS_PASSWORD"))),
 				DB:           cacheRedisDB,
 				KeyPrefix:    strings.TrimSpace(envOrDefault("CACHE_REDIS_PREFIX", "cache:pubver")),
 				DialTimeout:  3 * time.Second,
@@ -147,7 +147,7 @@ func Load() (Config, error) {
 		},
 		Analytics: AnalyticsConfig{
 			Enabled:      analyticsEnabled,
-			KafkaBrokers: splitAndTrim(os.Getenv("ANALYTICS_KAFKA_BROKERS")),
+			KafkaBrokers: splitAndTrim(envOrDefault("ANALYTICS_KAFKA_BROKERS", os.Getenv("KAFKA_BROKERS"))),
 			KafkaTopic:   strings.TrimSpace(envOrDefault("ANALYTICS_KAFKA_TOPIC", "verification.events")),
 			ClientID:     strings.TrimSpace(envOrDefault("ANALYTICS_KAFKA_CLIENT_ID", "pubver-analytics")),
 			WriteTimeout: 3 * time.Second,
@@ -376,6 +376,9 @@ func loadJWTEncKey() ([]byte, error) {
 	if value := strings.TrimSpace(os.Getenv("JWT_ENC_SECRET")); value != "" {
 		return deriveJWTEncKey(value)
 	}
+	if value := strings.TrimSpace(os.Getenv("QR_PAYLOAD_ENCRYPTION_SECRET")); value != "" {
+		return deriveJWTEncKey(value)
+	}
 	if value := strings.TrimSpace(os.Getenv("JWT_ENC_KEY_BASE64")); value != "" {
 		return decodeJWTEncKeyBase64("JWT_ENC_KEY_BASE64", value)
 	}
@@ -389,7 +392,7 @@ func loadJWTEncKey() ([]byte, error) {
 		return decodeJWTEncKeyBase64("JWT_ENC_KEY_HEX", value)
 	}
 
-	return nil, errors.New("set JWT_ENC_SECRET, JWT_ENC_KEY_BASE64, JWT_ENC_KEY, or legacy JWT_ENC_KEY_HEX for A256GCM payload decryption")
+	return nil, errors.New("set JWT_ENC_SECRET, QR_PAYLOAD_ENCRYPTION_SECRET, JWT_ENC_KEY_BASE64, JWT_ENC_KEY, or legacy JWT_ENC_KEY_HEX for A256GCM payload decryption")
 }
 
 func deriveJWTEncKey(secret string) ([]byte, error) {

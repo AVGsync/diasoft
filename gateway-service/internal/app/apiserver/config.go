@@ -1,6 +1,10 @@
 package apiserver
 
 import (
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	kafkainfra "github.com/diasoft/gateway-service/internal/infrastructure/kafka"
@@ -61,22 +65,22 @@ type CacheConfig struct {
 func NewConfig() *Config {
 	return &Config{
 		BindAddr:                  ":8080",
-		LogLevel:                  "debug",
-		PublicBaseURL:             "http://localhost:3000",
-		JWTSecret:                 "gateway-access-secret",
-		ShareJWTSecret:            "gateway-share-secret",
-		SigningKeysMasterKey:      "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
-		QRPayloadEncryptionSecret: "XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI=",
+		LogLevel:                  "info",
+		PublicBaseURL:             "http://localhost",
+		JWTSecret:                 "",
+		ShareJWTSecret:            "",
+		SigningKeysMasterKey:      "",
+		QRPayloadEncryptionSecret: "",
 		AccessTokenTTL:            24 * time.Hour,
 		ShareTokenTTL:             72 * time.Hour,
-		BootstrapAdminEmail:       "admin@platform.local",
-		BootstrapAdminPassword:    "Admin12345!",
-		DemoUniversityName:        "Демо Университет",
-		DemoUniversityVUZCode:     "DEMO2026",
-		DemoUniversityINN:         "7701234567",
-		DemoUniversityOGRN:        "1027700123456",
-		DemoUniversityEmail:       "demo.vuz@platform.local",
-		DemoUniversityPassword:    "University123!",
+		BootstrapAdminEmail:       "",
+		BootstrapAdminPassword:    "",
+		DemoUniversityName:        "",
+		DemoUniversityVUZCode:     "",
+		DemoUniversityINN:         "",
+		DemoUniversityOGRN:        "",
+		DemoUniversityEmail:       "",
+		DemoUniversityPassword:    "",
 		DemoUniversityPrivateKey:  "",
 		RateLimit: &RateLimitConfig{
 			Enabled:           true,
@@ -111,4 +115,121 @@ func NewConfig() *Config {
 		DB:    postgres.NewConfig(),
 		Kafka: kafkainfra.NewConfig(),
 	}
+}
+
+func (c *Config) Validate() error {
+	if c.DB == nil {
+		return errors.New("db config is required")
+	}
+	if c.Kafka == nil {
+		return errors.New("kafka config is required")
+	}
+	if c.RateLimit == nil || c.RateLimit.Redis == nil {
+		return errors.New("rate limit config is required")
+	}
+	if c.Cache == nil || c.Cache.Redis == nil {
+		return errors.New("cache config is required")
+	}
+	if strings.TrimSpace(c.BindAddr) == "" {
+		return errors.New("BIND_ADDR must not be empty")
+	}
+	if strings.TrimSpace(c.DB.DatabaseURL) == "" {
+		return errors.New("DATABASE_URL or db.database_url is required")
+	}
+	if strings.TrimSpace(c.JWTSecret) == "" {
+		return errors.New("JWT_SECRET is required")
+	}
+	if strings.TrimSpace(c.ShareJWTSecret) == "" {
+		return errors.New("SHARE_JWT_SECRET is required")
+	}
+	if err := validateBase64Key("SIGNING_KEYS_MASTER_KEY", c.SigningKeysMasterKey); err != nil {
+		return err
+	}
+	if err := validateBase64Key("QR_PAYLOAD_ENCRYPTION_SECRET", c.QRPayloadEncryptionSecret); err != nil {
+		return err
+	}
+	if err := validateCredentialPair("bootstrap admin", c.BootstrapAdminEmail, c.BootstrapAdminPassword); err != nil {
+		return err
+	}
+	if err := validateDemoUniversityConfig(c); err != nil {
+		return err
+	}
+	if len(c.Kafka.Brokers) == 0 {
+		return errors.New("KAFKA_BROKERS must contain at least one broker")
+	}
+	if strings.TrimSpace(c.Kafka.RawTasksTopic) == "" {
+		return errors.New("KAFKA_RAW_TOPIC must not be empty")
+	}
+	if strings.TrimSpace(c.Kafka.ProcessingResultsTopic) == "" {
+		return errors.New("KAFKA_RESULTS_TOPIC must not be empty")
+	}
+	if strings.TrimSpace(c.Kafka.VerificationEventsTopic) == "" {
+		return errors.New("KAFKA_VERIFICATION_EVENTS_TOPIC must not be empty")
+	}
+	if strings.TrimSpace(c.Kafka.ConsumerGroup) == "" {
+		return errors.New("KAFKA_CONSUMER_GROUP must not be empty")
+	}
+
+	return nil
+}
+
+func validateBase64Key(envName, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fmt.Errorf("%s is required", envName)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(trimmed)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(trimmed)
+		if err != nil {
+			return fmt.Errorf("%s must be base64 and decode to 32 bytes", envName)
+		}
+	}
+	if len(decoded) != 32 {
+		return fmt.Errorf("%s must decode to exactly 32 bytes, got %d", envName, len(decoded))
+	}
+
+	return nil
+}
+
+func validateCredentialPair(name, first, second string) error {
+	first = strings.TrimSpace(first)
+	second = strings.TrimSpace(second)
+
+	switch {
+	case first == "" && second == "":
+		return nil
+	case first == "" || second == "":
+		return fmt.Errorf("%s configuration is incomplete", name)
+	default:
+		return nil
+	}
+}
+
+func validateDemoUniversityConfig(c *Config) error {
+	values := []string{
+		c.DemoUniversityName,
+		c.DemoUniversityVUZCode,
+		c.DemoUniversityINN,
+		c.DemoUniversityOGRN,
+		c.DemoUniversityEmail,
+		c.DemoUniversityPassword,
+	}
+
+	filled := 0
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			filled++
+		}
+	}
+
+	if filled == 0 {
+		return nil
+	}
+	if filled != len(values) {
+		return errors.New("demo university configuration is incomplete")
+	}
+
+	return nil
 }

@@ -95,3 +95,33 @@ func TestLoadAcceptsConfiguredRedisRateLimiter(t *testing.T) {
 		t.Fatalf("RateLimit.Redis.Addr = %q, want %q", cfg.RateLimit.Redis.Addr, "localhost:6379")
 	}
 }
+
+func TestLoadJWTEncKeyFallsBackToQRPayloadEncryptionSecret(t *testing.T) {
+	t.Setenv("JWT_ENC_SECRET", "")
+	t.Setenv("QR_PAYLOAD_ENCRYPTION_SECRET", base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
+
+	key, err := loadJWTEncKey()
+	if err != nil {
+		t.Fatalf("loadJWTEncKey() error = %v", err)
+	}
+
+	if string(key) != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("unexpected key: %q", string(key))
+	}
+}
+
+func TestLoadUsesGenericRedisPasswordFallback(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/diasoft?sslmode=disable")
+	t.Setenv("JWT_ENC_SECRET", "plain-secret")
+	t.Setenv("RATE_LIMIT_ENABLED", "true")
+	t.Setenv("RATE_LIMIT_REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDIS_PASSWORD", "shared-redis-password")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.RateLimit.Redis.Password != "shared-redis-password" {
+		t.Fatalf("RateLimit.Redis.Password = %q, want %q", cfg.RateLimit.Redis.Password, "shared-redis-password")
+	}
+}

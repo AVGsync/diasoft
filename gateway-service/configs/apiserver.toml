@@ -1,20 +1,20 @@
 bind_addr = ":8080"
-log_level = "debug"
-public_base_url = "http://localhost:80"
-jwt_secret = "gateway-access-secret"
-share_jwt_secret = "gateway-share-secret"
-signing_keys_master_key = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
-qr_payload_encryption_secret = "XpMcu0eI/4SrmsO99dYLUPAwgyarZbrS92RzFmUjTPI="
+log_level = "info"
+public_base_url = "http://localhost"
+jwt_secret = ""
+share_jwt_secret = ""
+signing_keys_master_key = ""
+qr_payload_encryption_secret = ""
 access_token_ttl = "24h"
 share_token_ttl = "72h"
-bootstrap_admin_email = "admin@platform.local"
-bootstrap_admin_password = "Admin12345!"
-demo_university_name = "Демо Университет"
-demo_university_vuz_code = "DEMO2026"
-demo_university_inn = "7701234567"
-demo_university_ogrn = "1027700123456"
-demo_university_email = "demo.vuz@platform.local"
-demo_university_password = "University123!"
+bootstrap_admin_email = ""
+bootstrap_admin_password = ""
+demo_university_name = ""
+demo_university_vuz_code = ""
+demo_university_inn = ""
+demo_university_ogrn = ""
+demo_university_email = ""
+demo_university_password = ""
 demo_university_private_key_path = ""
 
 [rate_limit]
@@ -48,7 +48,7 @@ read_timeout = "2s"
 write_timeout = "2s"
 
 [db]
-database_url = "postgres://gateway_user:gateway_password@localhost:5432/postgres?sslmode=disable"
+database_url = ""
 
 [kafka]
 brokers = ["localhost:9092"]
